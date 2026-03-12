@@ -2,8 +2,10 @@ import discord
 from discord import app_commands
 import logging
 
-from bot.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID
+from bot.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_APPROVALS_CHANNEL_ID
 from bot.twitter.rate_limiter import budget_remaining
+from bot.content.generator import generate_tweets_from_idea
+from bot.discord_bot.channels import send_draft_for_approval
 from bot import database as db
 
 log = logging.getLogger(__name__)
@@ -49,5 +51,38 @@ def create_bot() -> SportsBot:
         state = "PAUSED" if bot.paused else "RUNNING"
         await interaction.response.send_message(f"Bot is now **{state}**", ephemeral=True)
         log.info("Bot %s by %s", state, interaction.user)
+
+    @bot.tree.command(name="suggest", description="Suggest a tweet idea for Claude to write")
+    @app_commands.describe(idea="Your tweet idea or topic")
+    async def suggest_cmd(interaction: discord.Interaction, idea: str):
+        await interaction.response.defer(ephemeral=True)
+        tweets = await generate_tweets_from_idea(idea)
+        if not tweets:
+            await interaction.followup.send("Claude couldn't generate tweets from that. Try again?", ephemeral=True)
+            return
+
+        for tweet_text in tweets:
+            draft_id = await db.insert_draft({
+                "event_id": None,
+                "tweet_text": tweet_text,
+                "status": "pending",
+                "discord_message_id": None,
+            })
+            await db.increment_stat("drafts_created")
+
+            msg = await send_draft_for_approval(
+                bot,
+                draft_id=draft_id,
+                tweet_text=tweet_text,
+                event_type="suggestion",
+                event_description=f"User idea: {idea}",
+                on_approve=bot.on_approve,
+                on_reject=bot.on_reject,
+            )
+            if msg:
+                bot.draft_messages[draft_id] = msg
+                await db.update_draft(draft_id, discord_message_id=str(msg.id))
+
+        await interaction.followup.send(f"Generated {len(tweets)} tweet(s) — check #approvals!", ephemeral=True)
 
     return bot

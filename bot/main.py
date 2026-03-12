@@ -28,6 +28,10 @@ class SportsBotApp:
         self.scheduler = SportsScheduler(self.monitors, self._on_events)
         # Map draft_id -> discord message for updating after approve/reject
         self._draft_messages: dict[int, object] = {}
+        # Expose approve/reject handlers and draft map on the bot for /suggest
+        self.discord_bot.on_approve = self._handle_approve
+        self.discord_bot.on_reject = self._handle_reject
+        self.discord_bot.draft_messages = self._draft_messages
 
     async def start(self):
         await db.init_db()
