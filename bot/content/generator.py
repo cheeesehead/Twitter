@@ -67,14 +67,17 @@ def _parse_tweets(text: str) -> list[str]:
         stripped = line.strip()
         # Detect tweet boundaries: numbered options or blank lines between content
         if stripped and (
-            stripped.startswith(("1.", "2.", "Option 1", "Option 2", "Tweet 1", "Tweet 2"))
+            stripped.startswith(("1.", "1)", "2.", "2)", "Option 1", "Option 2",
+                "Tweet 1", "Tweet 2", "**Option", "**Tweet"))
         ):
             if current:
                 tweets.append("\n".join(current).strip())
                 current = []
             # Remove the prefix
-            for prefix in ("1.", "2.", "Option 1:", "Option 2:", "Tweet 1:", "Tweet 2:",
-                           "Option 1.", "Option 2.", "Tweet 1.", "Tweet 2."):
+            for prefix in ("**Option 1:**", "**Option 2:**", "**Tweet 1:**", "**Tweet 2:**",
+                           "Option 1:", "Option 2:", "Tweet 1:", "Tweet 2:",
+                           "Option 1.", "Option 2.", "Tweet 1.", "Tweet 2.",
+                           "1)", "2)", "1.", "2."):
                 if stripped.startswith(prefix):
                     stripped = stripped[len(prefix):].strip()
                     break
@@ -89,11 +92,15 @@ def _parse_tweets(text: str) -> list[str]:
     if current:
         tweets.append("\n".join(current).strip())
 
-    # Clean up quotes
+    # Clean up quotes and preamble
     cleaned = []
+    preamble_phrases = ("here are", "here's", "sure,", "sure!", "certainly")
     for t in tweets:
         t = t.strip('"').strip("'").strip("`").strip()
         if t and len(t) > 10:  # skip garbage fragments
+            # Skip preamble lines Claude sometimes adds
+            if t.lower().startswith(preamble_phrases):
+                continue
             cleaned.append(t)
 
     return cleaned[:2]
