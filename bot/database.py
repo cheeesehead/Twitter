@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS articles (
     url TEXT,
     summary TEXT,
     teams TEXT,
+    processed INTEGER DEFAULT 0,
     seen_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -73,6 +74,11 @@ CREATE TABLE IF NOT EXISTS daily_stats (
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
+        # Migration: add processed column if missing (existing DBs)
+        cursor = await db.execute("PRAGMA table_info(articles)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "processed" not in columns:
+            await db.execute("ALTER TABLE articles ADD COLUMN processed INTEGER DEFAULT 0")
         await db.commit()
 
 
@@ -218,6 +224,26 @@ async def insert_article(article: dict):
             """INSERT OR IGNORE INTO articles (source_id, source, title, url, summary, teams)
                VALUES (:source_id, :source, :title, :url, :summary, :teams)""",
             article,
+        )
+        await db.commit()
+
+
+async def get_unprocessed_articles() -> list[dict]:
+    async with await get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM articles WHERE processed = 0 ORDER BY seen_at ASC"
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def mark_articles_processed(source_ids: list[str]):
+    if not source_ids:
+        return
+    async with await get_db() as db:
+        placeholders = ",".join("?" for _ in source_ids)
+        await db.execute(
+            f"UPDATE articles SET processed = 1 WHERE source_id IN ({placeholders})",
+            source_ids,
         )
         await db.commit()
 

@@ -35,3 +35,8 @@ DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bot.db")
 
 # Claude model
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# Feed active hours (Eastern time) — suggestions only sent during this window
+FEED_ACTIVE_START = 10  # 10am Eastern
+FEED_ACTIVE_END = 24    # midnight Eastern
+TIMEZONE = "America/New_York"

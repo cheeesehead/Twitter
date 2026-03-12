@@ -1,11 +1,16 @@
 import asyncio
 import logging
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
 from bot import database as db
-from bot.config import DISCORD_BOT_TOKEN, EVENT_SCORE_THRESHOLD
+from bot.config import (
+    DISCORD_BOT_TOKEN, EVENT_SCORE_THRESHOLD,
+    FEED_ACTIVE_START, FEED_ACTIVE_END, TIMEZONE,
+)
 from bot.sports.season_manager import create_monitors
 from bot.sports.scheduler import SportsScheduler
 from bot.sports.base import SportEvent
@@ -169,17 +174,61 @@ class SportsBotApp:
 
     # --- News/RSS feed polling ---
 
+    @staticmethod
+    def _is_active_hours() -> bool:
+        now = datetime.now(ZoneInfo(TIMEZONE))
+        return FEED_ACTIVE_START <= now.hour < FEED_ACTIVE_END
+
     async def _poll_espn_news(self):
         if self.discord_bot.paused:
             return
+        # Always poll to save articles for dedup (they get processed=0 in DB)
         articles = await poll_espn_news(self._http_session)
-        await self._process_articles(articles)
+        if not self._is_active_hours():
+            if articles:
+                log.info("Outside active hours — queued %d ESPN articles for later", len(articles))
+            return
+        # During active hours: process new articles + any overnight backlog
+        await self._process_articles_with_backlog(articles)
 
     async def _poll_rss_feeds(self):
         if self.discord_bot.paused:
             return
         articles = await poll_rss_feeds(self._http_session)
+        if not self._is_active_hours():
+            if articles:
+                log.info("Outside active hours — queued %d RSS articles for later", len(articles))
+            return
+        await self._process_articles_with_backlog(articles)
+
+    async def _process_articles_with_backlog(self, new_articles: list[dict]):
+        """Process new articles plus any unprocessed backlog from off-hours."""
+        # Fetch all unprocessed articles (includes overnight backlog + just-polled)
+        all_unprocessed = await db.get_unprocessed_articles()
+        if not all_unprocessed:
+            return
+
+        # Convert DB rows to the article dict format _process_articles expects
+        articles = []
+        for row in all_unprocessed:
+            articles.append({
+                "source_id": row["source_id"],
+                "source": row["source"],
+                "title": row["title"],
+                "url": row.get("url", ""),
+                "summary": row.get("summary", ""),
+                "teams": row.get("teams", ""),
+            })
+
+        if len(all_unprocessed) > len(new_articles or []):
+            backlog = len(all_unprocessed) - len(new_articles or [])
+            log.info("Processing %d backlogged articles from off-hours", backlog)
+
         await self._process_articles(articles)
+
+        # Mark all as processed
+        source_ids = [row["source_id"] for row in all_unprocessed]
+        await db.mark_articles_processed(source_ids)
 
     async def _process_articles(self, articles: list[dict]):
         if not articles:
