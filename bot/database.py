@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS tweet_log (
     FOREIGN KEY (draft_id) REFERENCES drafts(id)
 );
 
+CREATE TABLE IF NOT EXISTS articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id TEXT UNIQUE NOT NULL,
+    source TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT,
+    summary TEXT,
+    teams TEXT,
+    seen_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS daily_stats (
     date TEXT PRIMARY KEY,
     tweets_posted INTEGER DEFAULT 0,
@@ -187,6 +198,26 @@ async def increment_stat(stat: str, day: str | None = None):
     async with await get_db() as db:
         await db.execute(
             f"UPDATE daily_stats SET {stat} = {stat} + 1 WHERE date = ?", (day,)
+        )
+        await db.commit()
+
+
+# --- Articles (news/RSS dedup) ---
+
+async def article_exists(source_id: str) -> bool:
+    async with await get_db() as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM articles WHERE source_id = ?", (source_id,)
+        )
+        return await cursor.fetchone() is not None
+
+
+async def insert_article(article: dict):
+    async with await get_db() as db:
+        await db.execute(
+            """INSERT OR IGNORE INTO articles (source_id, source, title, url, summary, teams)
+               VALUES (:source_id, :source, :title, :url, :summary, :teams)""",
+            article,
         )
         await db.commit()
 

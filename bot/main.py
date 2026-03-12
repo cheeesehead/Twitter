@@ -2,19 +2,23 @@ import asyncio
 import logging
 import sys
 
+import aiohttp
+
 from bot import database as db
 from bot.config import DISCORD_BOT_TOKEN, EVENT_SCORE_THRESHOLD
 from bot.sports.season_manager import create_monitors
 from bot.sports.scheduler import SportsScheduler
 from bot.sports.base import SportEvent
 from bot.content.event_scorer import filter_events
-from bot.content.generator import generate_tweets
+from bot.content.generator import generate_tweets, generate_tweets_from_news
 from bot.discord_bot.bot import create_bot
 from bot.discord_bot.channels import (
     send_draft_for_approval, send_log, update_approval_message, mark_rejected,
 )
 from bot.twitter.client import create_twitter_client, post_tweet
 from bot.twitter.rate_limiter import can_tweet
+from bot.feeds.espn_news import poll_espn_news
+from bot.feeds.rss_reader import poll_rss_feeds
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +45,15 @@ class SportsBotApp:
         if not active:
             log.warning("No sports are currently in season! Bot will poll but find no games.")
 
+        # Create shared aiohttp session for feed polling
+        self._http_session = aiohttp.ClientSession()
+
+        # Register news/RSS feed polling jobs
+        self.scheduler.register_feed("feed_espn_news", self._poll_espn_news)
+        self.scheduler.register_feed("feed_rss", self._poll_rss_feeds)
+
         self.scheduler.start()
+        log.info("News and RSS feed polling registered")
 
         # Run Discord bot (this blocks until bot shuts down)
         await self.discord_bot.start(DISCORD_BOT_TOKEN)
@@ -51,6 +63,8 @@ class SportsBotApp:
         for monitor in self.monitors:
             if hasattr(monitor, "close"):
                 await monitor.close()
+        if hasattr(self, "_http_session") and self._http_session:
+            await self._http_session.close()
         await self.discord_bot.close()
 
     async def _on_events(self, events: list[SportEvent]):
@@ -152,6 +166,92 @@ class SportsBotApp:
         else:
             if interaction:
                 await interaction.followup.send("Failed to post tweet. Check logs.", ephemeral=True)
+
+    # --- News/RSS feed polling ---
+
+    async def _poll_espn_news(self):
+        if self.discord_bot.paused:
+            return
+        articles = await poll_espn_news(self._http_session)
+        await self._process_articles(articles)
+
+    async def _poll_rss_feeds(self):
+        if self.discord_bot.paused:
+            return
+        articles = await poll_rss_feeds(self._http_session)
+        await self._process_articles(articles)
+
+    async def _process_articles(self, articles: list[dict]):
+        if not articles:
+            return
+
+        # Score articles as SportEvents to reuse the filtering pipeline
+        events = []
+        for article in articles:
+            event = SportEvent(
+                game_id=f"article_{article['source']}",
+                event_type="news_reaction",
+                description=article["title"],
+                score=0,
+                data={
+                    "source": article["source"],
+                    "title": article["title"],
+                    "url": article.get("url", ""),
+                    "summary": article.get("summary", ""),
+                    "sport": article.get("sport", ""),
+                    "teams": article.get("teams", []),
+                },
+            )
+            events.append(event)
+
+        worthy = filter_events(events, threshold=EVENT_SCORE_THRESHOLD)
+        if not worthy:
+            return
+
+        log.info("Processing %d worthy articles (of %d total)", len(worthy), len(events))
+
+        for event in worthy:
+            try:
+                await self._process_news_event(event)
+            except Exception:
+                log.exception("Error processing news article: %s", event.description)
+
+    async def _process_news_event(self, event: SportEvent):
+        """Generate tweets from a news article and send for approval."""
+        tweets = await generate_tweets_from_news(event.data)
+        if not tweets:
+            log.warning("No tweets generated for article: %s", event.description)
+            return
+
+        # Save as a pseudo-event in the events table
+        event_id = await db.insert_event(event.to_db_dict())
+
+        for tweet_text in tweets:
+            draft_id = await db.insert_draft({
+                "event_id": event_id,
+                "tweet_text": tweet_text,
+                "status": "pending",
+                "discord_message_id": None,
+            })
+            await db.increment_stat("drafts_created")
+
+            if self.test_mode:
+                log.info("[TEST MODE] News Draft #%d: %s", draft_id, tweet_text)
+                await send_log(self.discord_bot, f"[TEST] News Draft #{draft_id}: {tweet_text}")
+                continue
+
+            msg = await send_draft_for_approval(
+                self.discord_bot,
+                draft_id=draft_id,
+                tweet_text=tweet_text,
+                event_type="news_reaction",
+                event_description=f"[NEWS] {event.description}",
+                on_approve=self._handle_approve,
+                on_reject=self._handle_reject,
+            )
+            if msg:
+                self._draft_messages[draft_id] = msg
+                await db.update_draft(draft_id, discord_message_id=str(msg.id))
 
     async def _handle_reject(self, draft_id: int, interaction=None):
         await db.update_draft(draft_id, status="rejected", resolved_at="now")

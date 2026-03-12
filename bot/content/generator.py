@@ -55,6 +55,28 @@ async def generate_tweets_from_idea(idea: str) -> list[str]:
     return valid
 
 
+async def generate_tweets_from_news(article_data: dict) -> list[str]:
+    """Generate tweet options from a news article/headline."""
+    prompt = build_prompt("news_reaction", article_data)
+    try:
+        response = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=300,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception:
+        log.exception("Claude API error for news reaction")
+        return []
+
+    text = response.content[0].text
+    tweets = _parse_tweets(text)
+    valid = [t for t in tweets if len(t) <= 280]
+    if not valid:
+        return await _retry_shorter(prompt)
+    return valid
+
+
 async def generate_tweets(event: SportEvent) -> list[str]:
     prompt = build_prompt(event.event_type, event.data)
 

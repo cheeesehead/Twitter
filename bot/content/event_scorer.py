@@ -12,6 +12,7 @@ BASE_SCORES = {
     "halftime": 4,
     "overtime": 8,
     "final": 4,
+    "news_reaction": 5,
 }
 
 # Philly teams — always tweet about these
@@ -121,6 +122,44 @@ def score_event(event: SportEvent) -> float:
     # March Madness boost (tournament games inherently more interesting)
     if data.get("sport") == "March Madness":
         score += 1
+
+    # News article scoring — boost Philly-related headlines
+    if event.event_type == "news_reaction":
+        title = data.get("title", "").lower()
+        summary = data.get("summary", "").lower()
+        text = f"{title} {summary}"
+
+        # Philly team mentions in headline/summary
+        philly_keywords = [
+            "eagles", "sixers", "76ers", "phillies", "flyers", "union",
+            "villanova", "temple", "philadelphia", "philly",
+            "jalen hurts", "saquon", "joel embiid", "tyrese maxey",
+            "bryce harper", "nick sirianni", "nick nurse",
+        ]
+        if any(kw in text for kw in philly_keywords):
+            score += 3
+
+        # Rival mentions
+        rival_keywords = [
+            "cowboys", "dallas", "knicks", "celtics", "mets", "yankees",
+            "giants", "commanders", "steelers", "penguins", "red sox",
+        ]
+        if any(kw in text for kw in rival_keywords):
+            score += 1.5
+
+        # Trade/signing/breaking news boost
+        breaking_keywords = [
+            "trade", "traded", "signing", "signs", "fired", "hired",
+            "injury", "torn", "out for", "suspended", "released", "waived",
+            "breaking", "report", "source", "deal",
+        ]
+        if any(kw in text for kw in breaking_keywords):
+            score += 1.5
+
+        # Reddit/viral content (r_eagles etc.) gets a small boost
+        source = data.get("source", "")
+        if source.startswith("rss_r_"):
+            score += 0.5
 
     return min(score, 10.0)
 

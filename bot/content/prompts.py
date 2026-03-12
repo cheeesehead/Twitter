@@ -103,6 +103,14 @@ Write 2 tweet options as a quote tweet response. Be witty, opinionated, or funny
 {idea}
 
 Write 2 tweet options based on this idea. Stay in character as @BroadStTakes — a witty Philly sports personality.""",
+
+    "news_reaction": """You just saw this headline/article:
+
+Source: {source}
+Headline: {title}
+Summary: {summary}
+
+Write 2 tweet options reacting to this news. Give a hot take, joke, or strong opinion. If it's about a Philly team, bring that hometown energy. If it's about a rival, talk your trash. Don't just repeat the headline — add your take. Keep each under 280 characters.""",
 }
 
 
