@@ -65,6 +65,11 @@ SPORT_ENDPOINTS = {
     "college_football": "football/college-football",
     "mlb": "baseball/mlb",
     "nhl": "hockey/nhl",
+    "premier_league": "soccer/eng.1",
+    "champions_league": "soccer/uefa.champions",
+    "usa_soccer_men": "soccer/usa.1",
+    "usa_soccer_women": "soccer/usa.nwsl",
+    "f1": "racing/f1",
 }
 
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports"

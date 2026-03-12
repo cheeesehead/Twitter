@@ -4,7 +4,7 @@ import logging
 
 from bot.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_APPROVALS_CHANNEL_ID
 from bot.twitter.rate_limiter import budget_remaining
-from bot.content.generator import generate_tweets_from_idea
+from bot.content.generator import generate_tweets_from_idea, generate_quote_tweets
 from bot.discord_bot.channels import send_draft_for_approval
 from bot import database as db
 
@@ -84,5 +84,41 @@ def create_bot() -> SportsBot:
                 await db.update_draft(draft_id, discord_message_id=str(msg.id))
 
         await interaction.followup.send(f"Generated {len(tweets)} tweet(s) — check #approvals!", ephemeral=True)
+
+    @bot.tree.command(name="quote", description="Generate a quote tweet reaction")
+    @app_commands.describe(
+        tweet="The tweet text or URL you want to quote tweet",
+        context="Optional extra context (e.g. 'this is about the Sixers trade')",
+    )
+    async def quote_cmd(interaction: discord.Interaction, tweet: str, context: str = ""):
+        await interaction.response.defer(ephemeral=True)
+        tweets = await generate_quote_tweets(tweet, context)
+        if not tweets:
+            await interaction.followup.send("Couldn't generate a take on that. Try again?", ephemeral=True)
+            return
+
+        for tweet_text in tweets:
+            draft_id = await db.insert_draft({
+                "event_id": None,
+                "tweet_text": tweet_text,
+                "status": "pending",
+                "discord_message_id": None,
+            })
+            await db.increment_stat("drafts_created")
+
+            msg = await send_draft_for_approval(
+                bot,
+                draft_id=draft_id,
+                tweet_text=tweet_text,
+                event_type="quote_tweet",
+                event_description=f"Quote: {tweet[:100]}",
+                on_approve=bot.on_approve,
+                on_reject=bot.on_reject,
+            )
+            if msg:
+                bot.draft_messages[draft_id] = msg
+                await db.update_draft(draft_id, discord_message_id=str(msg.id))
+
+        await interaction.followup.send(f"Generated {len(tweets)} quote tweet(s) — check #approvals!", ephemeral=True)
 
     return bot

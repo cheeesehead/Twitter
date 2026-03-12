@@ -14,11 +14,77 @@ BASE_SCORES = {
     "final": 4,
 }
 
+# Philly teams — always tweet about these
+PHILLY_TEAMS = {
+    # NBA
+    "philadelphia 76ers", "76ers", "sixers",
+    # NFL
+    "philadelphia eagles", "eagles",
+    # MLB
+    "philadelphia phillies", "phillies",
+    # NHL
+    "philadelphia flyers", "flyers",
+    # MLS
+    "philadelphia union", "union",
+    # College
+    "villanova wildcats", "villanova",
+    "temple owls", "temple",
+    "drexel dragons", "drexel",
+    "saint joseph's hawks", "st. joseph's", "saint joseph's",
+    "penn quakers", "penn",
+    "la salle explorers", "la salle",
+}
+
+# Philly rivals — we love when they lose
+PHILLY_RIVALS = {
+    "dallas cowboys", "cowboys",
+    "dallas mavericks", "mavericks",
+    "new york giants", "giants",
+    "new york knicks", "knicks",
+    "new york mets", "mets",
+    "new york yankees", "yankees",
+    "new york rangers", "rangers",
+    "new york jets", "jets",
+    "boston celtics", "celtics",
+    "boston red sox", "red sox",
+    "washington commanders", "commanders",
+    "pittsburgh steelers", "steelers",
+    "pittsburgh penguins", "penguins",
+}
+
+
+def _is_philly_involved(data: dict) -> bool:
+    teams = [
+        data.get("home_team", "").lower(),
+        data.get("away_team", "").lower(),
+        data.get("winner", "").lower(),
+        data.get("loser", "").lower(),
+    ]
+    return any(t in PHILLY_TEAMS for t in teams if t)
+
+
+def _is_rival_involved(data: dict) -> bool:
+    teams = [
+        data.get("home_team", "").lower(),
+        data.get("away_team", "").lower(),
+        data.get("winner", "").lower(),
+        data.get("loser", "").lower(),
+    ]
+    return any(t in PHILLY_RIVALS for t in teams if t)
+
 
 def score_event(event: SportEvent) -> float:
     base = BASE_SCORES.get(event.event_type, 5)
     score = float(base)
     data = event.data
+
+    # PHILLY BOOST: always tweet about our teams
+    if _is_philly_involved(data):
+        score += 3
+
+    # Rival boost: we enjoy covering their losses
+    if _is_rival_involved(data):
+        score += 1.5
 
     # Upset magnitude bonus
     if event.event_type == "upset":

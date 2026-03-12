@@ -10,12 +10,32 @@ log = logging.getLogger(__name__)
 client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 
+async def generate_quote_tweets(source_text: str, context: str = "") -> list[str]:
+    prompt = build_prompt("quote_tweet", {
+        "source_text": source_text,
+        "context": context or "No additional context provided.",
+    })
+    try:
+        response = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=300,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception:
+        log.exception("Claude API error for quote tweet")
+        return []
+
+    text = response.content[0].text
+    tweets = _parse_tweets(text)
+    valid = [t for t in tweets if len(t) <= 280]
+    if not valid:
+        return await _retry_shorter(prompt)
+    return valid
+
+
 async def generate_tweets_from_idea(idea: str) -> list[str]:
-    prompt = (
-        f"A user wants you to write a tweet about this idea/topic:\n\n"
-        f"{idea}\n\n"
-        f"Write 2 tweet options. Make them engaging and authentic."
-    )
+    prompt = build_prompt("suggestion", {"idea": idea})
     try:
         response = await client.messages.create(
             model=CLAUDE_MODEL,
