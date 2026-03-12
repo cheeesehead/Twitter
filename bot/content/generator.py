@@ -1,0 +1,99 @@
+import logging
+import anthropic
+
+from bot.config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from bot.sports.base import SportEvent
+from bot.content.prompts import SYSTEM_PROMPT, build_prompt
+
+log = logging.getLogger(__name__)
+
+client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+
+async def generate_tweets(event: SportEvent) -> list[str]:
+    prompt = build_prompt(event.event_type, event.data)
+
+    try:
+        response = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=300,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception:
+        log.exception("Claude API error for event %s", event.event_type)
+        return []
+
+    text = response.content[0].text
+    tweets = _parse_tweets(text)
+
+    # Validate length
+    valid = [t for t in tweets if len(t) <= 280]
+    if not valid:
+        log.warning("All generated tweets exceeded 280 chars, retrying with emphasis")
+        return await _retry_shorter(prompt)
+
+    return valid
+
+
+async def _retry_shorter(original_prompt: str) -> list[str]:
+    retry_prompt = (
+        original_prompt
+        + "\n\nIMPORTANT: Your previous tweets were too long. Each tweet MUST be under 280 characters. "
+        "Be more concise. Count characters carefully."
+    )
+    try:
+        response = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=300,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": retry_prompt}],
+        )
+    except Exception:
+        log.exception("Claude API retry error")
+        return []
+
+    text = response.content[0].text
+    tweets = _parse_tweets(text)
+    return [t for t in tweets if len(t) <= 280]
+
+
+def _parse_tweets(text: str) -> list[str]:
+    tweets = []
+    lines = text.strip().split("\n")
+    current = []
+
+    for line in lines:
+        stripped = line.strip()
+        # Detect tweet boundaries: numbered options or blank lines between content
+        if stripped and (
+            stripped.startswith(("1.", "2.", "Option 1", "Option 2", "Tweet 1", "Tweet 2"))
+        ):
+            if current:
+                tweets.append("\n".join(current).strip())
+                current = []
+            # Remove the prefix
+            for prefix in ("1.", "2.", "Option 1:", "Option 2:", "Tweet 1:", "Tweet 2:",
+                           "Option 1.", "Option 2.", "Tweet 1.", "Tweet 2."):
+                if stripped.startswith(prefix):
+                    stripped = stripped[len(prefix):].strip()
+                    break
+            if stripped:
+                current.append(stripped)
+        elif stripped:
+            current.append(stripped)
+        elif current:
+            tweets.append("\n".join(current).strip())
+            current = []
+
+    if current:
+        tweets.append("\n".join(current).strip())
+
+    # Clean up quotes
+    cleaned = []
+    for t in tweets:
+        t = t.strip('"').strip("'").strip("`").strip()
+        if t and len(t) > 10:  # skip garbage fragments
+            cleaned.append(t)
+
+    return cleaned[:2]
