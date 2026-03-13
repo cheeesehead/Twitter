@@ -269,7 +269,7 @@ class SportsBotApp:
 
         await self._process_articles(articles)
 
-        # Mark all as processed
+        # Mark all as processed (including ones we skipped due to cap)
         source_ids = [row["source_id"] for row in all_unprocessed]
         await db.mark_articles_processed(source_ids)
 
@@ -299,6 +299,12 @@ class SportsBotApp:
         worthy = filter_events(events, threshold=EVENT_SCORE_THRESHOLD)
         if not worthy:
             return
+
+        # Cap drafts per cycle to avoid flooding Discord
+        MAX_ARTICLES_PER_CYCLE = 3
+        if len(worthy) > MAX_ARTICLES_PER_CYCLE:
+            log.info("Capping articles from %d to %d per cycle", len(worthy), MAX_ARTICLES_PER_CYCLE)
+            worthy = worthy[:MAX_ARTICLES_PER_CYCLE]
 
         log.info("Processing %d worthy articles (of %d total)", len(worthy), len(events))
 
