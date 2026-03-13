@@ -1,0 +1,10 @@
+[
+  {"id": "trust_the_process", "file": "trust_the_process.jpg", "description": "Joel Embiid 'Trust the Process' celebration", "mood": ["hype", "celebration", "philly"]},
+  {"id": "sad_eagles", "file": "sad_eagles.jpg", "description": "Sad Eagles fan in the stands", "mood": ["pain", "loss", "frustration"]},
+  {"id": "its_always_sunny", "file": "always_sunny.jpg", "description": "It's Always Sunny in Philadelphia title card", "mood": ["sarcasm", "irony", "philly"]},
+  {"id": "gritty_stare", "file": "gritty_stare.jpg", "description": "Gritty staring menacingly", "mood": ["chaos", "intimidation", "philly"]},
+  {"id": "philly_special", "file": "philly_special.jpg", "description": "Philly Special trick play from Super Bowl LII", "mood": ["hype", "legendary", "eagles"]},
+  {"id": "crying_jordan", "file": "crying_jordan.jpg", "description": "Crying Michael Jordan meme face", "mood": ["pain", "loss", "mockery"]},
+  {"id": "nick_foles", "file": "nick_foles.jpg", "description": "Big Dick Nick Foles energy", "mood": ["confidence", "swagger", "eagles"]},
+  {"id": "ai_sixer", "file": "ai_sixer.jpg", "description": "Allen Iverson practice rant / stepping over Ty Lue", "mood": ["defiance", "iconic", "sixers"]}
+]

@@ -1,5 +1,6 @@
 import discord
 import logging
+import os
 from datetime import datetime
 
 from bot.config import DISCORD_APPROVALS_CHANNEL_ID, DISCORD_LOG_CHANNEL_ID
@@ -18,6 +19,8 @@ async def send_draft_for_approval(
     on_approve,
     on_reject,
     on_revise=None,
+    meme_id: str | None = None,
+    article_url: str | None = None,
 ) -> discord.Message | None:
     channel = bot.get_channel(DISCORD_APPROVALS_CHANNEL_ID)
     if not channel:
@@ -41,8 +44,30 @@ async def send_draft_for_approval(
     )
     embed.add_field(name="Event", value=event_description[:200], inline=False)
 
-    view = ApprovalView(draft_id, tweet_text, on_approve, on_reject, on_revise=on_revise)
-    msg = await channel.send(embed=embed, view=view)
+    if article_url:
+        embed.add_field(name="Article Link", value=article_url, inline=False)
+
+    # Attach meme image preview if present
+    file_attachment = None
+    if meme_id:
+        from bot.media.meme_picker import get_meme_path
+        meme_path = get_meme_path(meme_id)
+        if meme_path:
+            filename = os.path.basename(meme_path)
+            file_attachment = discord.File(meme_path, filename=filename)
+            embed.set_image(url=f"attachment://{filename}")
+            embed.add_field(name="Meme", value=meme_id, inline=True)
+
+    view = ApprovalView(
+        draft_id, tweet_text, on_approve, on_reject,
+        on_revise=on_revise, meme_id=meme_id, article_url=article_url,
+    )
+
+    kwargs = {"embed": embed, "view": view}
+    if file_attachment:
+        kwargs["file"] = file_attachment
+
+    msg = await channel.send(**kwargs)
     return msg
 
 

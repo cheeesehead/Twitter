@@ -98,6 +98,15 @@ async def init_db():
     columns = [row[1] for row in await cursor.fetchall()]
     if "processed" not in columns:
         await _db.execute("ALTER TABLE articles ADD COLUMN processed INTEGER DEFAULT 0")
+
+    # Migration: add meme_id and article_url columns to drafts
+    cursor = await _db.execute("PRAGMA table_info(drafts)")
+    draft_columns = [row[1] for row in await cursor.fetchall()]
+    if "meme_id" not in draft_columns:
+        await _db.execute("ALTER TABLE drafts ADD COLUMN meme_id TEXT")
+    if "article_url" not in draft_columns:
+        await _db.execute("ALTER TABLE drafts ADD COLUMN article_url TEXT")
+
     await _db.commit()
 
 
@@ -164,8 +173,8 @@ async def get_recent_events(game_id: str, limit: int = 10) -> list[dict]:
 async def insert_draft(draft: dict) -> int:
     db = get_db()
     cursor = await db.execute(
-        """INSERT INTO drafts (event_id, tweet_text, status, discord_message_id)
-           VALUES (:event_id, :tweet_text, :status, :discord_message_id)""",
+        """INSERT INTO drafts (event_id, tweet_text, status, discord_message_id, meme_id, article_url)
+           VALUES (:event_id, :tweet_text, :status, :discord_message_id, :meme_id, :article_url)""",
         draft,
     )
     await db.commit()

@@ -177,6 +177,21 @@ Write 2 tweets. React like you just saw this on your phone — not like you're w
 Write 2 tweets. Just react — don't summarize the headline back.""",
 }
 
+MEME_INSTRUCTIONS = """
+Available memes (pick one by ID if it fits the vibe, or write NONE — don't force it):
+{meme_menu}
+
+Format each tweet as:
+TWEET: <your tweet text>
+MEME: <meme_id or NONE>
+"""
+
+MEME_INSTRUCTIONS_EMPTY = """
+Format each tweet as:
+TWEET: <your tweet text>
+MEME: NONE
+"""
+
 
 def build_prompt(event_type: str, data: dict) -> str:
     template = CONTENT_TEMPLATES.get(event_type, CONTENT_TEMPLATES["final"])

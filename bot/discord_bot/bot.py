@@ -62,12 +62,18 @@ def create_bot() -> SportsBot:
             await interaction.followup.send("Claude couldn't generate tweets from that. Try again?", ephemeral=True)
             return
 
-        for tweet_text in tweets:
+        for tweet_dict in tweets:
+            tweet_text = tweet_dict["text"]
+            meme_id = tweet_dict.get("meme_id")
+            article_url = tweet_dict.get("article_url")
+
             draft_id = await db.insert_draft({
                 "event_id": None,
                 "tweet_text": tweet_text,
                 "status": "pending",
                 "discord_message_id": None,
+                "meme_id": meme_id,
+                "article_url": article_url,
             })
             await db.increment_stat("drafts_created")
 
@@ -80,6 +86,8 @@ def create_bot() -> SportsBot:
                 on_approve=bot.on_approve,
                 on_reject=bot.on_reject,
                 on_revise=bot.on_revise,
+                meme_id=meme_id,
+                article_url=article_url,
             )
             if msg:
                 bot.draft_messages[draft_id] = msg
@@ -245,12 +253,18 @@ def create_bot() -> SportsBot:
                     await interaction.followup.send("Couldn't generate a take on that. Try again?", ephemeral=True)
                     return
 
-                for tweet_text in tweets:
+                for tweet_dict in tweets:
+                    tweet_text = tweet_dict["text"]
+                    meme_id = tweet_dict.get("meme_id")
+                    article_url = tweet_dict.get("article_url")
+
                     draft_id = await db.insert_draft({
                         "event_id": None,
                         "tweet_text": tweet_text,
                         "status": "pending",
                         "discord_message_id": None,
+                        "meme_id": meme_id,
+                        "article_url": article_url,
                     })
                     await db.increment_stat("drafts_created")
 
@@ -263,6 +277,8 @@ def create_bot() -> SportsBot:
                         on_approve=bot.on_approve,
                         on_reject=bot.on_reject,
                         on_revise=bot.on_revise,
+                        meme_id=meme_id,
+                        article_url=article_url,
                     )
                     if msg:
                         bot.draft_messages[draft_id] = msg

@@ -24,7 +24,8 @@ from bot.discord_bot.channels import (
     send_draft_for_approval, send_log, update_approval_message, mark_rejected,
     mark_revised,
 )
-from bot.twitter.client import create_twitter_client, post_tweet
+from bot.twitter.client import create_twitter_client, create_twitter_api, post_tweet, upload_media
+from bot.media.meme_picker import get_meme_path
 from bot.twitter.rate_limiter import can_tweet
 from bot.feeds.espn_news import poll_espn_news
 from bot.feeds.rss_reader import poll_rss_feeds
@@ -37,6 +38,7 @@ class SportsBotApp:
         self.test_mode = test_mode
         self.discord_bot = create_bot()
         self.twitter_client = None if test_mode else create_twitter_client()
+        self.twitter_api = None if test_mode else create_twitter_api()
         self.monitors = create_monitors()
         self.scheduler = SportsScheduler(self.monitors, self._on_events)
         # Map draft_id -> discord message for updating after approve/reject
@@ -159,12 +161,18 @@ class SportsBotApp:
             return
 
         # Send each tweet option to Discord for approval
-        for tweet_text in tweets:
+        for tweet_dict in tweets:
+            tweet_text = tweet_dict["text"]
+            meme_id = tweet_dict.get("meme_id")
+            article_url = tweet_dict.get("article_url")
+
             draft_id = await db.insert_draft({
                 "event_id": event_id,
                 "tweet_text": tweet_text,
                 "status": "pending",
                 "discord_message_id": None,
+                "meme_id": meme_id,
+                "article_url": article_url,
             })
             await db.increment_stat("drafts_created")
 
@@ -185,6 +193,8 @@ class SportsBotApp:
                 on_approve=self._handle_approve,
                 on_reject=self._handle_reject,
                 on_revise=self._handle_revise,
+                meme_id=meme_id,
+                article_url=article_url,
             )
             if msg:
                 self._draft_messages[draft_id] = msg
@@ -203,7 +213,26 @@ class SportsBotApp:
             await db.update_draft(draft_id, status="approved", resolved_at="now")
             return
 
-        tweet_id, error = await post_tweet(self.twitter_client, tweet_text)
+        # Look up draft for meme_id and article_url
+        draft = await db.get_draft(draft_id)
+        meme_id = draft.get("meme_id") if draft else None
+        article_url = draft.get("article_url") if draft else None
+
+        # Upload meme image if present
+        media_ids = None
+        if meme_id and self.twitter_api:
+            meme_path = get_meme_path(meme_id)
+            if meme_path:
+                media_id = upload_media(self.twitter_api, meme_path)
+                if media_id:
+                    media_ids = [media_id]
+
+        # Append article URL to tweet text (Twitter auto-unfurls)
+        post_text = tweet_text
+        if article_url:
+            post_text = f"{tweet_text} {article_url}"
+
+        tweet_id, error = await post_tweet(self.twitter_client, post_text, media_ids=media_ids)
         if tweet_id:
             await db.update_draft(draft_id, status="approved", resolved_at="now")
             await db.log_tweet(draft_id, tweet_id, tweet_text)
@@ -335,12 +364,18 @@ class SportsBotApp:
         # Save as a pseudo-event in the events table
         event_id = await db.insert_event(event.to_db_dict())
 
-        for tweet_text in tweets:
+        for tweet_dict in tweets:
+            tweet_text = tweet_dict["text"]
+            meme_id = tweet_dict.get("meme_id")
+            article_url = tweet_dict.get("article_url")
+
             draft_id = await db.insert_draft({
                 "event_id": event_id,
                 "tweet_text": tweet_text,
                 "status": "pending",
                 "discord_message_id": None,
+                "meme_id": meme_id,
+                "article_url": article_url,
             })
             await db.increment_stat("drafts_created")
 
@@ -358,6 +393,8 @@ class SportsBotApp:
                 on_approve=self._handle_approve,
                 on_reject=self._handle_reject,
                 on_revise=self._handle_revise,
+                meme_id=meme_id,
+                article_url=article_url,
             )
             if msg:
                 self._draft_messages[draft_id] = msg
@@ -400,12 +437,18 @@ class SportsBotApp:
         event_id = original["event_id"] if original else None
 
         # 5. Send revised drafts for approval
-        for new_tweet in revised:
+        for tweet_dict in revised:
+            new_tweet = tweet_dict["text"]
+            meme_id = tweet_dict.get("meme_id")
+            article_url = tweet_dict.get("article_url")
+
             new_draft_id = await db.insert_draft({
                 "event_id": event_id,
                 "tweet_text": new_tweet,
                 "status": "pending",
                 "discord_message_id": None,
+                "meme_id": meme_id,
+                "article_url": article_url,
             })
             await db.increment_stat("drafts_created")
 
@@ -418,6 +461,8 @@ class SportsBotApp:
                 on_approve=self._handle_approve,
                 on_reject=self._handle_reject,
                 on_revise=self._handle_revise,
+                meme_id=meme_id,
+                article_url=article_url,
             )
             if msg:
                 self._draft_messages[new_draft_id] = msg

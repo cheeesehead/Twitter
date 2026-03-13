@@ -52,13 +52,16 @@ class FeedbackModal(discord.ui.Modal, title="Revise Tweet"):
 
 class ApprovalView(discord.ui.View):
     def __init__(self, draft_id: int, tweet_text: str, on_approve, on_reject,
-                 on_revise=None):
+                 on_revise=None, meme_id: str | None = None,
+                 article_url: str | None = None):
         super().__init__(timeout=3600)  # 1 hour timeout
         self.draft_id = draft_id
         self.tweet_text = tweet_text
         self.on_approve = on_approve
         self.on_reject = on_reject
         self.on_revise = on_revise
+        self.meme_id = meme_id
+        self.article_url = article_url
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="\u2705")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
