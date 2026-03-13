@@ -85,6 +85,53 @@ def create_bot() -> SportsBot:
 
         await interaction.followup.send(f"Generated {len(tweets)} tweet(s) — check #approvals!", ephemeral=True)
 
+    @bot.tree.command(name="learn", description="Save a tweet or text as a style reference for Claude")
+    @app_commands.describe(
+        text="The tweet text or content to learn from",
+        url="Optional: URL of the original tweet",
+    )
+    async def learn_cmd(interaction: discord.Interaction, text: str, url: str = ""):
+        ref_id = await db.insert_style_reference(
+            content=text,
+            source_url=url or None,
+            added_by=str(interaction.user),
+        )
+        count = await db.get_style_reference_count()
+        await interaction.response.send_message(
+            f"Saved style reference #{ref_id} ({count} total):\n> {text[:200]}",
+            ephemeral=True,
+        )
+        log.info("Style reference #%d added by %s", ref_id, interaction.user)
+
+    @bot.tree.command(name="references", description="View or manage saved style references")
+    @app_commands.describe(action="What to do", ref_id="Reference ID (for delete)")
+    @app_commands.choices(action=[
+        app_commands.Choice(name="list", value="list"),
+        app_commands.Choice(name="delete", value="delete"),
+        app_commands.Choice(name="count", value="count"),
+    ])
+    async def references_cmd(interaction: discord.Interaction, action: str = "list", ref_id: int = 0):
+        if action == "count":
+            count = await db.get_style_reference_count()
+            await interaction.response.send_message(f"You have **{count}** style references saved.", ephemeral=True)
+        elif action == "delete":
+            if ref_id <= 0:
+                await interaction.response.send_message("Provide a ref_id to delete.", ephemeral=True)
+                return
+            await db.delete_style_reference(ref_id)
+            await interaction.response.send_message(f"Deleted style reference #{ref_id}.", ephemeral=True)
+            log.info("Style reference #%d deleted by %s", ref_id, interaction.user)
+        else:
+            refs = await db.get_style_references(limit=20)
+            if not refs:
+                await interaction.response.send_message("No style references saved yet. Use `/learn` to add some!", ephemeral=True)
+                return
+            lines = []
+            for ref in refs:
+                preview = ref["content"][:80] + ("..." if len(ref["content"]) > 80 else "")
+                lines.append(f"**#{ref['id']}** — {preview}")
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
     @bot.tree.command(name="quote", description="Generate a quote tweet reaction")
     @app_commands.describe(
         tweet="The tweet text or URL you want to quote tweet",

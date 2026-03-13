@@ -22,6 +22,30 @@ Rules:
 - When tweeting about rivals losing, enjoy it
 """
 
+STYLE_REFERENCE_SECTION = """
+
+## Style References
+The account owner has saved these tweets/posts as examples of the tone, humor, and style they want @BroadStTakes to emulate. Study the voice, structure, and energy — don't copy them verbatim, but let them influence how you write:
+
+{references}
+"""
+
+
+async def build_system_prompt() -> str:
+    """Build system prompt, injecting style references if any exist."""
+    from bot import database as db
+    refs = await db.get_style_references(limit=50)
+    if not refs:
+        return SYSTEM_PROMPT
+
+    ref_lines = []
+    for i, ref in enumerate(refs, 1):
+        ref_lines.append(f"{i}. {ref['content']}")
+
+    section = STYLE_REFERENCE_SECTION.format(references="\n".join(ref_lines))
+    return SYSTEM_PROMPT.rstrip() + section
+
+
 CONTENT_TEMPLATES = {
     "upset": """The event: A major upset just happened in {sport}.
 {description}

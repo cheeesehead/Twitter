@@ -3,7 +3,7 @@ import anthropic
 
 from bot.config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from bot.sports.base import SportEvent
-from bot.content.prompts import SYSTEM_PROMPT, build_prompt
+from bot.content.prompts import SYSTEM_PROMPT, build_prompt, build_system_prompt
 
 log = logging.getLogger(__name__)
 
@@ -16,10 +16,11 @@ async def generate_quote_tweets(source_text: str, context: str = "") -> list[str
         "context": context or "No additional context provided.",
     })
     try:
+        system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=300,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
@@ -37,10 +38,11 @@ async def generate_quote_tweets(source_text: str, context: str = "") -> list[str
 async def generate_tweets_from_idea(idea: str) -> list[str]:
     prompt = build_prompt("suggestion", {"idea": idea})
     try:
+        system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=300,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
@@ -59,10 +61,11 @@ async def generate_tweets_from_news(article_data: dict) -> list[str]:
     """Generate tweet options from a news article/headline."""
     prompt = build_prompt("news_reaction", article_data)
     try:
+        system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=300,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
@@ -81,10 +84,11 @@ async def generate_tweets(event: SportEvent) -> list[str]:
     prompt = build_prompt(event.event_type, event.data)
 
     try:
+        system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=300,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
@@ -110,10 +114,11 @@ async def _retry_shorter(original_prompt: str) -> list[str]:
         "Be more concise. Count characters carefully."
     )
     try:
+        system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=300,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": retry_prompt}],
         )
     except Exception:

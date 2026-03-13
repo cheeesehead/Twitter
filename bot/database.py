@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS articles (
     seen_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS style_references (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    source_url TEXT,
+    added_by TEXT,
+    added_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS daily_stats (
     date TEXT PRIMARY KEY,
     tweets_posted INTEGER DEFAULT 0,
@@ -246,6 +254,42 @@ async def mark_articles_processed(source_ids: list[str]):
             source_ids,
         )
         await db.commit()
+
+
+# --- Style References ---
+
+async def insert_style_reference(content: str, source_url: str | None = None,
+                                  added_by: str | None = None) -> int:
+    async with await get_db() as db:
+        cursor = await db.execute(
+            """INSERT INTO style_references (content, source_url, added_by)
+               VALUES (?, ?, ?)""",
+            (content, source_url, added_by),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_style_references(limit: int = 50) -> list[dict]:
+    async with await get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM style_references ORDER BY added_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def delete_style_reference(ref_id: int):
+    async with await get_db() as db:
+        await db.execute("DELETE FROM style_references WHERE id = ?", (ref_id,))
+        await db.commit()
+
+
+async def get_style_reference_count() -> int:
+    async with await get_db() as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM style_references")
+        row = await cursor.fetchone()
+        return row[0]
 
 
 async def get_monthly_tweet_count() -> int:
