@@ -169,12 +169,12 @@ Rewrite it. 2 options.""",
 {title}
 {summary}
 
-Write 2 tweets. React like you just saw this on your phone — not like you're writing commentary.""",
+The article link will be attached to the tweet automatically, so people can read the full story. You don't need to summarize or explain — just react. Write 2 tweets. Keep each under 256 characters (the link takes the rest).""",
 
     "news_reaction": """{source}: {title}
 {summary}
 
-Write 2 tweets. Just react — don't summarize the headline back.""",
+The article link will be attached to the tweet automatically, so people can click through for context. You don't need to recap the headline — just react. Write 2 tweets. Keep each under 256 characters (the link takes the rest).""",
 }
 
 MEME_INSTRUCTIONS = """
