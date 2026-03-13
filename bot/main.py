@@ -245,74 +245,77 @@ class SportsBotApp:
         await self._process_articles_with_backlog(articles)
 
     async def _process_articles_with_backlog(self, new_articles: list[dict]):
-        """Process new articles plus any unprocessed backlog from off-hours."""
+        """Process new articles plus any unprocessed backlog from off-hours.
+
+        Keeps the top MAX_BACKLOG articles by score and drip-feeds
+        MAX_PER_CYCLE each polling interval.  Low-scoring and overflow
+        articles are marked processed so they don't accumulate forever.
+        """
+        MAX_BACKLOG = 15
+        MAX_PER_CYCLE = 3
+
         # Fetch all unprocessed articles (includes overnight backlog + just-polled)
         all_unprocessed = await db.get_unprocessed_articles()
         if not all_unprocessed:
             return
 
-        # Convert DB rows to the article dict format _process_articles expects
-        articles = []
-        for row in all_unprocessed:
-            articles.append({
-                "source_id": row["source_id"],
-                "source": row["source"],
-                "title": row["title"],
-                "url": row.get("url", ""),
-                "summary": row.get("summary", ""),
-                "teams": row.get("teams", ""),
-            })
-
-        if len(all_unprocessed) > len(new_articles or []):
-            backlog = len(all_unprocessed) - len(new_articles or [])
-            log.info("Processing %d backlogged articles from off-hours", backlog)
-
-        await self._process_articles(articles)
-
-        # Mark all as processed (including ones we skipped due to cap)
-        source_ids = [row["source_id"] for row in all_unprocessed]
-        await db.mark_articles_processed(source_ids)
-
-    async def _process_articles(self, articles: list[dict]):
-        if not articles:
-            return
-
-        # Score articles as SportEvents to reuse the filtering pipeline
+        # Convert DB rows to article dicts and score via the existing pipeline
         events = []
-        for article in articles:
+        for row in all_unprocessed:
             event = SportEvent(
-                game_id=f"article_{article['source']}",
+                game_id=f"article_{row['source']}",
                 event_type="news_reaction",
-                description=article["title"],
+                description=row["title"],
                 score=0,
                 data={
-                    "source": article["source"],
-                    "title": article["title"],
-                    "url": article.get("url", ""),
-                    "summary": article.get("summary", ""),
-                    "sport": article.get("sport", ""),
-                    "teams": article.get("teams", []),
+                    "source_id": row["source_id"],
+                    "source": row["source"],
+                    "title": row["title"],
+                    "url": row.get("url", ""),
+                    "summary": row.get("summary", ""),
+                    "sport": row.get("sport", ""),
+                    "teams": row.get("teams", []),
                 },
             )
             events.append(event)
 
         worthy = filter_events(events, threshold=EVENT_SCORE_THRESHOLD)
+
+        # Mark unworthy articles as processed — they'll never score high enough
+        worthy_source_ids = {e.data.get("source_id") for e in worthy}
+        unworthy_ids = [row["source_id"] for row in all_unprocessed
+                        if row["source_id"] not in worthy_source_ids]
+        if unworthy_ids:
+            await db.mark_articles_processed(unworthy_ids)
+
         if not worthy:
             return
 
-        # Cap drafts per cycle to avoid flooding Discord
-        MAX_ARTICLES_PER_CYCLE = 3
-        if len(worthy) > MAX_ARTICLES_PER_CYCLE:
-            log.info("Capping articles from %d to %d per cycle", len(worthy), MAX_ARTICLES_PER_CYCLE)
-            worthy = worthy[:MAX_ARTICLES_PER_CYCLE]
+        # Cap backlog to top MAX_BACKLOG — worthy is already sorted by score desc
+        if len(worthy) > MAX_BACKLOG:
+            overflow = worthy[MAX_BACKLOG:]
+            overflow_ids = [e.data.get("source_id") for e in overflow]
+            await db.mark_articles_processed(overflow_ids)
+            worthy = worthy[:MAX_BACKLOG]
 
-        log.info("Processing %d worthy articles (of %d total)", len(worthy), len(events))
+        # Process top MAX_PER_CYCLE this cycle
+        batch = worthy[:MAX_PER_CYCLE]
+        log.info("Processing %d worthy articles (of %d unprocessed, %d in backlog)",
+                 len(batch), len(all_unprocessed), len(worthy))
 
-        for event in worthy:
+        for event in batch:
             try:
                 await self._process_news_event(event)
             except Exception:
                 log.exception("Error processing news article: %s", event.description)
+
+        # Mark only the processed batch as done
+        batch_ids = [e.data.get("source_id") for e in batch]
+        await db.mark_articles_processed(batch_ids)
+
+        remaining = len(worthy) - len(batch)
+        if remaining > 0:
+            log.info("%d backlog articles queued for next cycle", remaining)
 
     async def _process_news_event(self, event: SportEvent):
         """Generate tweets from a news article and send for approval."""
