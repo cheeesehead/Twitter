@@ -131,6 +131,17 @@ class SportsBotApp:
         if not worthy:
             return
 
+        # Filter out events from games the user has rejected
+        filtered = []
+        for event in worthy:
+            if not event.game_id.startswith("article_") and await db.is_game_suppressed(event.game_id):
+                log.info("Suppressed (rejected game): %s", event.description)
+                continue
+            filtered.append(event)
+        worthy = filtered
+        if not worthy:
+            return
+
         log.info("Processing %d worthy events (of %d total)", len(worthy), len(events))
 
         for event in worthy:
@@ -455,6 +466,18 @@ class SportsBotApp:
                         await send_log(
                             self.discord_bot,
                             f"Topic suppressed (48h): **{title}**\nKeywords: {', '.join(keywords)}"
+                        )
+
+                    # Suppress the entire game for live events (6h TTL)
+                    game_id = event.get("game_id", "")
+                    if game_id and not game_id.startswith("article_"):
+                        await db.insert_rejected_topic(
+                            keywords=[], source_title=title or game_id,
+                            event_id=event_id, ttl_hours=6, game_id=game_id
+                        )
+                        await send_log(
+                            self.discord_bot,
+                            f"Game suppressed (6h): **{title or game_id}**"
                         )
 
     async def _handle_revise(self, draft_id: int, tweet_text: str, feedback: str,

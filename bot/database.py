@@ -142,6 +142,12 @@ async def init_db():
         expires_at TEXT NOT NULL
     )""")
 
+    # Migration: add game_id column to rejected_topics
+    cursor = await _db.execute("PRAGMA table_info(rejected_topics)")
+    rt_columns = [row[1] for row in await cursor.fetchall()]
+    if "game_id" not in rt_columns:
+        await _db.execute("ALTER TABLE rejected_topics ADD COLUMN game_id TEXT")
+
     await _db.commit()
 
 
@@ -414,12 +420,13 @@ def extract_topic_keywords(title: str) -> list[str]:
 
 
 async def insert_rejected_topic(keywords: list[str], source_title: str,
-                                 event_id: int | None = None, ttl_hours: int = 48):
+                                 event_id: int | None = None, ttl_hours: int = 48,
+                                 game_id: str | None = None):
     db = get_db()
     await db.execute(
-        """INSERT INTO rejected_topics (keywords, source_title, event_id, expires_at)
-           VALUES (?, ?, ?, datetime('now', ?))""",
-        (json.dumps(keywords), source_title, event_id, f"+{ttl_hours} hours"),
+        """INSERT INTO rejected_topics (keywords, source_title, event_id, expires_at, game_id)
+           VALUES (?, ?, ?, datetime('now', ?), ?)""",
+        (json.dumps(keywords), source_title, event_id, f"+{ttl_hours} hours", game_id),
     )
     await db.commit()
 
@@ -440,6 +447,16 @@ async def is_topic_suppressed(title: str) -> bool:
         if len(title_keywords & rejected_keywords) >= 2:
             return True
     return False
+
+
+async def is_game_suppressed(game_id: str) -> bool:
+    """Check if a game_id has been rejected and is still within its suppression window."""
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM rejected_topics WHERE game_id = ? AND expires_at > datetime('now') LIMIT 1",
+        (game_id,),
+    )
+    return await cursor.fetchone() is not None
 
 
 async def get_pending_drafts_by_event(event_id: int) -> list[dict]:
