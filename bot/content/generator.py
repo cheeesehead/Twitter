@@ -57,9 +57,9 @@ async def generate_tweets_from_idea(idea: str) -> list[str]:
     return valid
 
 
-async def generate_tweets_from_news(article_data: dict) -> list[str]:
+async def generate_tweets_from_news(article_data: dict, event_type: str = "news_reaction") -> list[str]:
     """Generate tweet options from a news article/headline."""
-    prompt = build_prompt("news_reaction", article_data)
+    prompt = build_prompt(event_type, article_data)
     try:
         system = await build_system_prompt()
         response = await client.messages.create(

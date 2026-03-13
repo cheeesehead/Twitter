@@ -264,10 +264,13 @@ class SportsBotApp:
 
         # Convert DB rows to SportEvents and score via the existing pipeline
         events = []
+        local_news_sources = ("philly_news", "inquirer", "billypenn", "r_philadelphia")
         for row in all_unprocessed:
+            source = row["source"]
+            etype = "local_news" if source.startswith(local_news_sources) else "news_reaction"
             event = SportEvent(
-                game_id=f"article_{row['source']}",
-                event_type="news_reaction",
+                game_id=f"article_{source}",
+                event_type=etype,
                 description=row["title"],
                 score=0,
                 data={
@@ -322,7 +325,7 @@ class SportsBotApp:
 
     async def _process_news_event(self, event: SportEvent):
         """Generate tweets from a news article and send for approval."""
-        tweets = await generate_tweets_from_news(event.data)
+        tweets = await generate_tweets_from_news(event.data, event_type=event.event_type)
         if not tweets:
             log.warning("No tweets generated for article: %s", event.description)
             return
@@ -348,8 +351,8 @@ class SportsBotApp:
                 self.discord_bot,
                 draft_id=draft_id,
                 tweet_text=tweet_text,
-                event_type="news_reaction",
-                event_description=f"[NEWS] {event.description}",
+                event_type=event.event_type,
+                event_description=f"[{'LOCAL' if event.event_type == 'local_news' else 'NEWS'}] {event.description}",
                 on_approve=self._handle_approve,
                 on_reject=self._handle_reject,
                 on_revise=self._handle_revise,

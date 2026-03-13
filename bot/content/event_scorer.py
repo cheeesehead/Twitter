@@ -13,6 +13,7 @@ BASE_SCORES = {
     "overtime": 8,
     "final": 4,
     "news_reaction": 5,
+    "local_news": 5,
 }
 
 # Philly teams — always tweet about these
@@ -124,7 +125,7 @@ def score_event(event: SportEvent) -> float:
         score += 1
 
     # News article scoring — boost Philly-related headlines
-    if event.event_type == "news_reaction":
+    if event.event_type in ("news_reaction", "local_news"):
         title = data.get("title", "").lower()
         summary = data.get("summary", "").lower()
         text = f"{title} {summary}"
@@ -155,6 +156,18 @@ def score_event(event: SportEvent) -> float:
         ]
         if any(kw in text for kw in breaking_keywords):
             score += 1.5
+
+        # Local Philly news boost (politics, neighborhoods, city issues)
+        local_philly_keywords = [
+            "cherelle parker", "mayor parker", "city council",
+            "septa", "ppa", "broad street", "market street", "center city",
+            "south philly", "north philly", "west philly", "kensington",
+            "fishtown", "manayunk", "old city", "rittenhouse",
+            "philadelphia police", "ppd", "philly schools",
+            "city hall", "reading terminal", "wawa",
+        ]
+        if any(kw in text for kw in local_philly_keywords):
+            score += 2
 
         # Reddit/viral content (r_eagles etc.) gets a small boost
         source = data.get("source", "")

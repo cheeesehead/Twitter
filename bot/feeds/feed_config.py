@@ -20,11 +20,20 @@ REDDIT_FEEDS = {
     "r_phillies": "https://www.reddit.com/r/phillies/hot/.rss",
 }
 
+# Philly local news (non-sports)
+PHILLY_NEWS_FEEDS = {
+    "philly_news": "https://www.phillyvoice.com/news/rss/",
+    "inquirer": "https://www.inquirer.com/arcio/rss/category/news/",
+    "billypenn": "https://billypenn.com/feed/",
+    "r_philadelphia": "https://www.reddit.com/r/philadelphia/hot/.rss",
+}
+
 # All RSS feeds combined
 ALL_RSS_FEEDS: dict[str, str] = {}
 ALL_RSS_FEEDS.update(PHILLY_VOICE_FEEDS)
 ALL_RSS_FEEDS.update(NBC_SPORTS_PHILLY_FEEDS)
 ALL_RSS_FEEDS.update(REDDIT_FEEDS)
+ALL_RSS_FEEDS.update(PHILLY_NEWS_FEEDS)
 
 # ESPN news endpoints by sport
 ESPN_NEWS_ENDPOINTS = {
