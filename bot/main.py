@@ -1,10 +1,13 @@
 import asyncio
 import logging
+import os
 import sys
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from aiohttp import web
 
 from bot import database as db
 from bot.config import (
@@ -41,6 +44,26 @@ class SportsBotApp:
         self.discord_bot.on_approve = self._handle_approve
         self.discord_bot.on_reject = self._handle_reject
         self.discord_bot.draft_messages = self._draft_messages
+        self._start_time = time.monotonic()
+
+    async def _health_handler(self, request):
+        uptime = int(time.monotonic() - self._start_time)
+        return web.json_response({
+            "status": "ok",
+            "uptime_seconds": uptime,
+            "bot_ready": self.discord_bot.is_ready() if hasattr(self.discord_bot, "is_ready") else False,
+        })
+
+    async def _start_health_server(self):
+        app = web.Application()
+        app.router.add_get("/health", self._health_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        port = int(os.environ.get("PORT", 10000))
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        log.info("Health server listening on 0.0.0.0:%d", port)
+        return runner
 
     async def start(self):
         await db.init_db()
@@ -61,8 +84,12 @@ class SportsBotApp:
         self.scheduler.start()
         log.info("News and RSS feed polling registered")
 
-        # Run Discord bot (this blocks until bot shuts down)
-        await self.discord_bot.start(DISCORD_BOT_TOKEN)
+        # Start health-check server for Render, then run Discord bot
+        self._health_runner = await self._start_health_server()
+        try:
+            await self.discord_bot.start(DISCORD_BOT_TOKEN)
+        finally:
+            await self._health_runner.cleanup()
 
     async def shutdown(self):
         self.scheduler.stop()
