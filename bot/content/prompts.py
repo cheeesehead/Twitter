@@ -30,20 +30,40 @@ The account owner has saved these tweets/posts as examples of the tone, humor, a
 {references}
 """
 
+FEEDBACK_SECTION = """
+
+## Feedback Notes
+The account owner has given this feedback on previous drafts. Apply these preferences to ALL future tweets:
+
+{feedback_notes}
+"""
+
 
 async def build_system_prompt() -> str:
-    """Build system prompt, injecting style references if any exist."""
+    """Build system prompt, injecting style references and feedback notes if any exist."""
     from bot import database as db
+
+    prompt = SYSTEM_PROMPT
+
     refs = await db.get_style_references(limit=50)
-    if not refs:
-        return SYSTEM_PROMPT
+    if refs:
+        ref_lines = []
+        for i, ref in enumerate(refs, 1):
+            ref_lines.append(f"{i}. {ref['content']}")
+        prompt = prompt.rstrip() + STYLE_REFERENCE_SECTION.format(
+            references="\n".join(ref_lines)
+        )
 
-    ref_lines = []
-    for i, ref in enumerate(refs, 1):
-        ref_lines.append(f"{i}. {ref['content']}")
+    notes = await db.get_feedback_notes(limit=30)
+    if notes:
+        note_lines = []
+        for i, note in enumerate(notes, 1):
+            note_lines.append(f"{i}. {note['feedback']}")
+        prompt = prompt.rstrip() + FEEDBACK_SECTION.format(
+            feedback_notes="\n".join(note_lines)
+        )
 
-    section = STYLE_REFERENCE_SECTION.format(references="\n".join(ref_lines))
-    return SYSTEM_PROMPT.rstrip() + section
+    return prompt
 
 
 CONTENT_TEMPLATES = {
@@ -127,6 +147,13 @@ Write 2 tweet options as a quote tweet response. Be witty, opinionated, or funny
 {idea}
 
 Write 2 tweet options based on this idea. Stay in character as @BroadStTakes — a witty Philly sports personality.""",
+
+    "revision": """Here's a tweet draft you wrote:
+"{original_tweet}"
+
+The user gave this feedback: "{feedback}"
+
+Rewrite the tweet incorporating their feedback. Keep the same topic but adjust the tone/style/content as requested. Write 2 options under 280 characters.""",
 
     "news_reaction": """You just saw this headline/article:
 

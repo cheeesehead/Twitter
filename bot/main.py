@@ -18,10 +18,11 @@ from bot.sports.season_manager import create_monitors
 from bot.sports.scheduler import SportsScheduler
 from bot.sports.base import SportEvent
 from bot.content.event_scorer import filter_events
-from bot.content.generator import generate_tweets, generate_tweets_from_news
+from bot.content.generator import generate_tweets, generate_tweets_from_news, revise_tweet
 from bot.discord_bot.bot import create_bot
 from bot.discord_bot.channels import (
     send_draft_for_approval, send_log, update_approval_message, mark_rejected,
+    mark_revised,
 )
 from bot.twitter.client import create_twitter_client, post_tweet
 from bot.twitter.rate_limiter import can_tweet
@@ -40,9 +41,10 @@ class SportsBotApp:
         self.scheduler = SportsScheduler(self.monitors, self._on_events)
         # Map draft_id -> discord message for updating after approve/reject
         self._draft_messages: dict[int, object] = {}
-        # Expose approve/reject handlers and draft map on the bot for /suggest
+        # Expose approve/reject/revise handlers and draft map on the bot for /suggest
         self.discord_bot.on_approve = self._handle_approve
         self.discord_bot.on_reject = self._handle_reject
+        self.discord_bot.on_revise = self._handle_revise
         self.discord_bot.draft_messages = self._draft_messages
         self._start_time = time.monotonic()
 
@@ -182,6 +184,7 @@ class SportsBotApp:
                 event_description=event.description,
                 on_approve=self._handle_approve,
                 on_reject=self._handle_reject,
+                on_revise=self._handle_revise,
             )
             if msg:
                 self._draft_messages[draft_id] = msg
@@ -349,6 +352,7 @@ class SportsBotApp:
                 event_description=f"[NEWS] {event.description}",
                 on_approve=self._handle_approve,
                 on_reject=self._handle_reject,
+                on_revise=self._handle_revise,
             )
             if msg:
                 self._draft_messages[draft_id] = msg
@@ -363,6 +367,56 @@ class SportsBotApp:
         if msg:
             await mark_rejected(msg, reason)
         log.info("Draft #%d: %s", draft_id, reason)
+
+    async def _handle_revise(self, draft_id: int, tweet_text: str, feedback: str,
+                             interaction=None):
+        # 1. Save feedback for future learning
+        await db.insert_feedback_note(feedback, original_tweet=tweet_text)
+        log.info("Draft #%d: revision requested — %s", draft_id, feedback)
+
+        # 2. Mark original draft as revised
+        await db.update_draft(draft_id, status="revised", resolved_at="now")
+        old_msg = self._draft_messages.pop(draft_id, None)
+        if old_msg:
+            await mark_revised(old_msg)
+
+        # 3. Generate revised tweets
+        revised = await revise_tweet(tweet_text, feedback)
+        if not revised:
+            if interaction:
+                await interaction.followup.send(
+                    "Couldn't generate a revision. Try again or edit manually.",
+                    ephemeral=True,
+                )
+            return
+
+        # 4. Get original draft to inherit event_id
+        original = await db.get_draft(draft_id)
+        event_id = original["event_id"] if original else None
+
+        # 5. Send revised drafts for approval
+        for new_tweet in revised:
+            new_draft_id = await db.insert_draft({
+                "event_id": event_id,
+                "tweet_text": new_tweet,
+                "status": "pending",
+                "discord_message_id": None,
+            })
+            await db.increment_stat("drafts_created")
+
+            msg = await send_draft_for_approval(
+                self.discord_bot,
+                draft_id=new_draft_id,
+                tweet_text=new_tweet,
+                event_type="revision",
+                event_description=f"Revised from Draft #{draft_id} — Feedback: {feedback[:100]}",
+                on_approve=self._handle_approve,
+                on_reject=self._handle_reject,
+                on_revise=self._handle_revise,
+            )
+            if msg:
+                self._draft_messages[new_draft_id] = msg
+                await db.update_draft(new_draft_id, discord_message_id=str(msg.id))
 
 
 async def run(test_mode: bool = False):

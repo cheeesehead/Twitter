@@ -29,13 +29,36 @@ class EditModal(discord.ui.Modal, title="Edit Tweet"):
         await self.on_approve(self.draft_id, edited, interaction)
 
 
+class FeedbackModal(discord.ui.Modal, title="Revise Tweet"):
+    feedback = discord.ui.TextInput(
+        label="What's wrong with this tweet?",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        placeholder='e.g. "too aggressive", "make it funnier", "shorter"...',
+    )
+
+    def __init__(self, draft_id: int, tweet_text: str, on_revise):
+        super().__init__()
+        self.draft_id = draft_id
+        self.tweet_text = tweet_text
+        self.on_revise = on_revise
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        await self.on_revise(
+            self.draft_id, self.tweet_text, self.feedback.value.strip(), interaction
+        )
+
+
 class ApprovalView(discord.ui.View):
-    def __init__(self, draft_id: int, tweet_text: str, on_approve, on_reject):
+    def __init__(self, draft_id: int, tweet_text: str, on_approve, on_reject,
+                 on_revise=None):
         super().__init__(timeout=3600)  # 1 hour timeout
         self.draft_id = draft_id
         self.tweet_text = tweet_text
         self.on_approve = on_approve
         self.on_reject = on_reject
+        self.on_revise = on_revise
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="\u2705")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -54,6 +77,16 @@ class ApprovalView(discord.ui.View):
         modal = EditModal(self.tweet_text, self.draft_id, self.on_approve)
         await interaction.response.send_modal(modal)
         self.stop()
+
+    @discord.ui.button(label="Revise", style=discord.ButtonStyle.blurple, emoji="\U0001f504")
+    async def revise(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.on_revise:
+            await interaction.response.send_message(
+                "Revise not available.", ephemeral=True
+            )
+            return
+        modal = FeedbackModal(self.draft_id, self.tweet_text, self.on_revise)
+        await interaction.response.send_modal(modal)
 
     async def on_timeout(self):
         log.info("Draft %d approval timed out", self.draft_id)

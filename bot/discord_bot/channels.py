@@ -17,6 +17,7 @@ async def send_draft_for_approval(
     event_description: str,
     on_approve,
     on_reject,
+    on_revise=None,
 ) -> discord.Message | None:
     channel = bot.get_channel(DISCORD_APPROVALS_CHANNEL_ID)
     if not channel:
@@ -40,7 +41,7 @@ async def send_draft_for_approval(
     )
     embed.add_field(name="Event", value=event_description[:200], inline=False)
 
-    view = ApprovalView(draft_id, tweet_text, on_approve, on_reject)
+    view = ApprovalView(draft_id, tweet_text, on_approve, on_reject, on_revise=on_revise)
     msg = await channel.send(embed=embed, view=view)
     return msg
 
@@ -64,4 +65,11 @@ async def mark_rejected(message: discord.Message, reason: str = "Rejected"):
     embed = message.embeds[0] if message.embeds else discord.Embed()
     embed.color = discord.Color.red()
     embed.add_field(name="Status", value=reason, inline=False)
+    await message.edit(embed=embed, view=None)
+
+
+async def mark_revised(message: discord.Message):
+    embed = message.embeds[0] if message.embeds else discord.Embed()
+    embed.color = discord.Color.light_grey()
+    embed.add_field(name="Status", value="Revised — new draft below", inline=False)
     await message.edit(embed=embed, view=None)

@@ -79,6 +79,7 @@ def create_bot() -> SportsBot:
                 event_description=f"User idea: {idea}",
                 on_approve=bot.on_approve,
                 on_reject=bot.on_reject,
+                on_revise=bot.on_revise,
             )
             if msg:
                 bot.draft_messages[draft_id] = msg
@@ -242,6 +243,7 @@ def create_bot() -> SportsBot:
                         event_description=f"Quote: {source_text[:100]}",
                         on_approve=bot.on_approve,
                         on_reject=bot.on_reject,
+                        on_revise=bot.on_revise,
                     )
                     if msg:
                         bot.draft_messages[draft_id] = msg

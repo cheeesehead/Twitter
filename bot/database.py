@@ -76,6 +76,13 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     drafts_approved INTEGER DEFAULT 0,
     drafts_rejected INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS feedback_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedback TEXT NOT NULL,
+    original_tweet TEXT,
+    added_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 _db: aiosqlite.Connection | None = None
@@ -300,6 +307,27 @@ async def get_style_reference_count() -> int:
     cursor = await db.execute("SELECT COUNT(*) FROM style_references")
     row = await cursor.fetchone()
     return row[0]
+
+
+# --- Feedback Notes ---
+
+async def insert_feedback_note(feedback: str, original_tweet: str | None = None) -> int:
+    db = get_db()
+    cursor = await db.execute(
+        "INSERT INTO feedback_notes (feedback, original_tweet) VALUES (?, ?)",
+        (feedback, original_tweet),
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def get_feedback_notes(limit: int = 30) -> list[dict]:
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT * FROM feedback_notes ORDER BY added_at DESC LIMIT ?",
+        (limit,),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
 
 
 async def get_monthly_tweet_count() -> int:
