@@ -13,6 +13,20 @@ log = logging.getLogger(__name__)
 
 client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
+WEB_SEARCH_TOOL = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": 3,
+}
+
+
+def _extract_text(response) -> str:
+    """Extract the text content from a response that may include web search blocks."""
+    for block in reversed(response.content):
+        if block.type == "text":
+            return block.text
+    return ""
+
 
 def _append_meme_instructions(prompt: str) -> str:
     """Append meme selection instructions to a prompt."""
@@ -32,15 +46,16 @@ async def generate_quote_tweets(source_text: str, context: str = "") -> list[dic
         system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=300,
+            max_tokens=1024,
             system=system,
+            tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
         log.exception("Claude API error for quote tweet")
         return []
 
-    text = response.content[0].text
+    text = _extract_text(response)
     tweets = _parse_tweets(text)
     valid = [t for t in tweets if len(t["text"]) <= 280]
     if not valid:
@@ -55,15 +70,16 @@ async def generate_tweets_from_idea(idea: str) -> list[dict]:
         system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=300,
+            max_tokens=1024,
             system=system,
+            tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
         log.exception("Claude API error for suggestion")
         return []
 
-    text = response.content[0].text
+    text = _extract_text(response)
     tweets = _parse_tweets(text)
     valid = [t for t in tweets if len(t["text"]) <= 280]
     if not valid:
@@ -80,15 +96,16 @@ async def generate_tweets_from_news(article_data: dict, event_type: str = "news_
         system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=300,
+            max_tokens=1024,
             system=system,
+            tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
         log.exception("Claude API error for news reaction")
         return []
 
-    text = response.content[0].text
+    text = _extract_text(response)
     # URLs count as 23 chars on Twitter + 1 space = 24 chars overhead
     max_len = 256 if article_url else 280
     tweets = _parse_tweets(text)
@@ -114,15 +131,16 @@ async def revise_tweet(original_tweet: str, feedback: str) -> list[dict]:
         system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=300,
+            max_tokens=1024,
             system=system,
+            tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
         log.exception("Claude API error for tweet revision")
         return []
 
-    text = response.content[0].text
+    text = _extract_text(response)
     tweets = _parse_tweets(text)
     valid = [t for t in tweets if len(t["text"]) <= 280]
     if not valid:
@@ -138,15 +156,16 @@ async def generate_tweets(event: SportEvent) -> list[dict]:
         system = await build_system_prompt()
         response = await client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=300,
+            max_tokens=1024,
             system=system,
+            tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception:
         log.exception("Claude API error for event %s", event.event_type)
         return []
 
-    text = response.content[0].text
+    text = _extract_text(response)
     tweets = _parse_tweets(text)
 
     # Validate length
@@ -176,7 +195,7 @@ async def _retry_shorter(original_prompt: str, max_len: int = 280) -> list[dict]
         log.exception("Claude API retry error")
         return []
 
-    text = response.content[0].text
+    text = _extract_text(response)
     tweets = _parse_tweets(text)
     return [t for t in tweets if len(t["text"]) <= max_len]
 

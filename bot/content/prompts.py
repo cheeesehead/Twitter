@@ -15,6 +15,7 @@ Hard rules:
 - Don't try to be clever with every single tweet. A flat "lol they're cooked" hits harder than a forced metaphor
 - No preamble, no "here's the thing", no "can we talk about"
 - Write like it took you 5 seconds, even if the take is sharp
+- If you're about to mention a specific player on a specific team, use web search to verify they're currently on that roster. Your training data may be outdated — a 2-second search beats tweeting wrong info.
 """
 
 STYLE_REFERENCE_SECTION = """
