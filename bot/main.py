@@ -86,12 +86,26 @@ class SportsBotApp:
 
         # Start health-check server for Render, then run Discord bot
         self._health_runner = await self._start_health_server()
+        self._keep_alive_task = asyncio.create_task(self._keep_alive_loop())
         try:
             await self.discord_bot.start(DISCORD_BOT_TOKEN)
         finally:
             await self._health_runner.cleanup()
 
+    async def _keep_alive_loop(self):
+        port = int(os.environ.get("PORT", 10000))
+        url = f"http://localhost:{port}/health"
+        while True:
+            await asyncio.sleep(840)  # 14 minutes
+            try:
+                async with self._http_session.get(url) as resp:
+                    log.debug("Keep-alive ping: %d", resp.status)
+            except Exception:
+                log.debug("Keep-alive ping failed (non-critical)")
+
     async def shutdown(self):
+        if hasattr(self, "_keep_alive_task"):
+            self._keep_alive_task.cancel()
         self.scheduler.stop()
         for monitor in self.monitors:
             if hasattr(monitor, "close"):
