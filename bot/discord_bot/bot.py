@@ -4,6 +4,7 @@ import logging
 
 from bot.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_APPROVALS_CHANNEL_ID
 from bot.twitter.rate_limiter import budget_remaining
+from bot.twitter.tweet_fetcher import is_tweet_url, fetch_tweet_content, format_tweet_content
 from bot.content.generator import generate_tweets_from_idea, generate_quote_tweets
 from bot.discord_bot.channels import send_draft_for_approval
 from bot import database as db
@@ -87,20 +88,47 @@ def create_bot() -> SportsBot:
 
     @bot.tree.command(name="learn", description="Save a tweet or text as a style reference for Claude")
     @app_commands.describe(
-        text="The tweet text or content to learn from",
-        url="Optional: URL of the original tweet",
+        tweet="A tweet URL (x.com or twitter.com) or plain text to learn from",
     )
-    async def learn_cmd(interaction: discord.Interaction, text: str, url: str = ""):
+    async def learn_cmd(interaction: discord.Interaction, tweet: str):
+        source_url = None
+        content = tweet
+
+        if is_tweet_url(tweet):
+            session = getattr(bot, "http_session", None)
+            if not session:
+                await interaction.response.send_message(
+                    "Bot HTTP session not available. Try again in a moment.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            tweet_data = await fetch_tweet_content(tweet, session)
+            if not tweet_data:
+                await interaction.followup.send(
+                    "Couldn't fetch that tweet. Check the URL and try again.",
+                    ephemeral=True,
+                )
+                return
+
+            content = format_tweet_content(tweet_data)
+            source_url = tweet
+        else:
+            content = tweet
+
         ref_id = await db.insert_style_reference(
-            content=text,
-            source_url=url or None,
+            content=content,
+            source_url=source_url,
             added_by=str(interaction.user),
         )
         count = await db.get_style_reference_count()
-        await interaction.response.send_message(
-            f"Saved style reference #{ref_id} ({count} total):\n> {text[:200]}",
-            ephemeral=True,
-        )
+
+        msg = f"Saved style reference #{ref_id} ({count} total):\n> {content[:300]}"
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
         log.info("Style reference #%d added by %s", ref_id, interaction.user)
 
     @bot.tree.command(name="references", description="View or manage saved style references")

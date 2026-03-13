@@ -50,8 +50,9 @@ class SportsBotApp:
         if not active:
             log.warning("No sports are currently in season! Bot will poll but find no games.")
 
-        # Create shared aiohttp session for feed polling
+        # Create shared aiohttp session for feed polling and tweet fetching
         self._http_session = aiohttp.ClientSession()
+        self.discord_bot.http_session = self._http_session
 
         # Register news/RSS feed polling jobs
         self.scheduler.register_feed("feed_espn_news", self._poll_espn_news)
