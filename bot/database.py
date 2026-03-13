@@ -318,6 +318,16 @@ async def get_style_reference_count() -> int:
     return row[0]
 
 
+async def style_reference_exists_by_tweet_id(tweet_id: str) -> bool:
+    """Check if a style reference with this tweet ID already exists."""
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM style_references WHERE source_url LIKE ?",
+        (f"%/status/{tweet_id}%",),
+    )
+    return await cursor.fetchone() is not None
+
+
 # --- Feedback Notes ---
 
 async def insert_feedback_note(feedback: str, original_tweet: str | None = None) -> int:

@@ -1,10 +1,12 @@
+import asyncio
+
 import discord
 from discord import app_commands
 import logging
 
 from bot.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_APPROVALS_CHANNEL_ID
 from bot.twitter.rate_limiter import budget_remaining
-from bot.twitter.tweet_fetcher import is_tweet_url, fetch_tweet_content, format_tweet_content
+from bot.twitter.tweet_fetcher import is_tweet_url, fetch_tweet_content, format_tweet_content, extract_tweet_id
 from bot.content.generator import generate_tweets_from_idea, generate_quote_tweets
 from bot.discord_bot.channels import send_draft_for_approval
 from bot import database as db
@@ -173,6 +175,91 @@ def create_bot() -> SportsBot:
                 await interaction.followup.send("Something went wrong. Try again.", ephemeral=True)
         else:
             await interaction.response.send_modal(LearnModal())
+
+    class LearnBulkModal(discord.ui.Modal, title="Bulk import tweets"):
+        urls_input = discord.ui.TextInput(
+            label="Tweet URLs (one per line)",
+            style=discord.TextStyle.long,
+            placeholder="https://x.com/MikeBeauvais/status/123456789\nhttps://x.com/MikeBeauvais/status/987654321",
+            required=True,
+            max_length=4000,
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            try:
+                await _save_bulk_style_references(interaction, self.urls_input.value)
+            except Exception:
+                log.exception("Error in /learn-bulk modal")
+                if interaction.response.is_done():
+                    await interaction.followup.send("Something went wrong. Try again.", ephemeral=True)
+                else:
+                    await interaction.response.send_message("Something went wrong. Try again.", ephemeral=True)
+
+    async def _save_bulk_style_references(interaction: discord.Interaction, raw_input: str):
+        """Parse multiple tweet URLs and save each as a style reference."""
+        await interaction.response.defer(ephemeral=True)
+
+        session = getattr(bot, "http_session", None)
+        if not session:
+            await interaction.followup.send(
+                "Bot HTTP session not available. Try again in a moment.", ephemeral=True
+            )
+            return
+
+        # Parse URLs from input (split on whitespace/newlines)
+        urls = [token.strip() for token in raw_input.split() if is_tweet_url(token.strip())]
+
+        if not urls:
+            await interaction.followup.send(
+                "No valid tweet URLs found. Paste URLs like:\nhttps://x.com/user/status/123456",
+                ephemeral=True,
+            )
+            return
+
+        saved = 0
+        skipped = 0
+        failed = 0
+        previews = []
+
+        for url in urls:
+            tweet_id = extract_tweet_id(url)
+            if not tweet_id:
+                failed += 1
+                continue
+
+            if await db.style_reference_exists_by_tweet_id(tweet_id):
+                skipped += 1
+                continue
+
+            tweet_data = await fetch_tweet_content(url, session)
+            if not tweet_data:
+                failed += 1
+                previews.append(f"Failed: {url}")
+                continue
+
+            content = format_tweet_content(tweet_data)
+            ref_id = await db.insert_style_reference(
+                content=content,
+                source_url=url,
+                added_by=str(interaction.user),
+            )
+            saved += 1
+            previews.append(f"#{ref_id}: {content[:80]}")
+
+            await asyncio.sleep(0.5)
+
+        count = await db.get_style_reference_count()
+        summary = f"**Bulk import complete** ({count} total references)\n"
+        summary += f"Saved: {saved} | Skipped (duplicate): {skipped} | Failed: {failed}"
+        if previews:
+            summary += "\n\n" + "\n".join(previews[:20])
+
+        await interaction.followup.send(summary, ephemeral=True)
+        log.info("Bulk import by %s: %d saved, %d skipped, %d failed", interaction.user, saved, skipped, failed)
+
+    @bot.tree.command(name="learn-bulk", description="Import multiple tweets as style references at once")
+    async def learn_bulk_cmd(interaction: discord.Interaction):
+        await interaction.response.send_modal(LearnBulkModal())
 
     @bot.tree.command(name="references", description="View or manage saved style references")
     @app_commands.describe(action="What to do", ref_id="Reference ID (for delete)")
