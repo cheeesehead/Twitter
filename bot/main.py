@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -454,7 +455,6 @@ class SportsBotApp:
                 # Suppress the topic so similar articles are skipped
                 event = await db.get_event(event_id)
                 if event and event.get("data"):
-                    import json
                     try:
                         event_data = json.loads(event["data"])
                     except (json.JSONDecodeError, TypeError):
@@ -467,6 +467,29 @@ class SportsBotApp:
                             self.discord_bot,
                             f"Topic suppressed (48h): **{title}**\nKeywords: {', '.join(keywords)}"
                         )
+
+                        # Reject all other pending drafts matching the suppressed topic
+                        keyword_set = set(keywords)
+                        all_pending = await db.get_pending_drafts_with_events()
+                        for pd in all_pending:
+                            if pd["event_id"] == event_id:
+                                continue  # already handled above
+                            pd_title = ""
+                            if pd.get("data"):
+                                try:
+                                    pd_data = json.loads(pd["data"])
+                                    pd_title = pd_data.get("title") or ""
+                                except (json.JSONDecodeError, TypeError):
+                                    pass
+                            pd_title = pd_title or pd.get("description") or ""
+                            pd_keywords = set(db.extract_topic_keywords(pd_title))
+                            if len(pd_keywords & keyword_set) >= 2:
+                                await db.update_draft(pd["draft_id"], status="rejected", resolved_at="now")
+                                await db.increment_stat("drafts_rejected")
+                                pd_msg = self._draft_messages.pop(pd["draft_id"], None)
+                                if pd_msg:
+                                    await mark_rejected(pd_msg, "Rejected")
+                                log.info("Draft #%d: auto-rejected (topic match with #%d)", pd["draft_id"], draft_id)
 
                     # Suppress the entire game for live events (6h TTL)
                     game_id = event.get("game_id", "")

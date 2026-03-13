@@ -466,3 +466,15 @@ async def get_pending_drafts_by_event(event_id: int) -> list[dict]:
         (event_id,),
     )
     return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_pending_drafts_with_events() -> list[dict]:
+    """Get all pending drafts joined with their event data."""
+    db = get_db()
+    cursor = await db.execute(
+        """SELECT d.id as draft_id, d.event_id, e.description, e.data, e.game_id
+           FROM drafts d
+           JOIN events e ON d.event_id = e.id
+           WHERE d.status = 'pending'"""
+    )
+    return [dict(r) for r in await cursor.fetchall()]
