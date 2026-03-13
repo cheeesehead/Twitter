@@ -87,6 +87,8 @@ class SportsBotApp:
         self.scheduler.register_feed("feed_rss", self._poll_rss_feeds)
         # Single backlog processor runs on same interval, caps output globally
         self.scheduler.register_feed("process_backlog", self._process_article_backlog)
+        # Expire stale pending drafts (replaces discord.py on_timeout)
+        self.scheduler.register_feed("expire_stale_drafts", self._expire_stale_drafts)
 
         self.scheduler.start()
         log.info("News/RSS feed polling and backlog processor registered")
@@ -213,6 +215,13 @@ class SportsBotApp:
                 await db.update_draft(draft_id, discord_message_id=str(msg.id))
 
     async def _handle_approve(self, draft_id: int, tweet_text: str, interaction=None):
+        # Idempotency: skip if already resolved (e.g. clicked twice, or post-restart race)
+        draft = await db.get_draft(draft_id)
+        if not draft or draft["status"] != "pending":
+            log.info("Draft #%d: already %s, skipping approve",
+                     draft_id, draft["status"] if draft else "missing")
+            return
+
         allowed, reason = await can_tweet()
         if not allowed:
             log.warning("Cannot tweet: %s", reason)
@@ -253,6 +262,10 @@ class SportsBotApp:
 
             tweet_url = f"https://x.com/i/status/{tweet_id}"
             msg = self._draft_messages.pop(draft_id, None)
+            if not msg and interaction and hasattr(interaction, "message"):
+                msg = interaction.message
+            if not msg:
+                msg = await self._get_draft_message(draft_id)
             if msg:
                 await update_approval_message(msg, tweet_url)
             await send_log(self.discord_bot, f"Posted tweet: {tweet_url}")
@@ -425,12 +438,42 @@ class SportsBotApp:
                 self._draft_messages[draft_id] = msg
                 await db.update_draft(draft_id, discord_message_id=str(msg.id))
 
+    async def _get_draft_message(self, draft_id: int):
+        """Get the Discord message for a draft, checking in-memory cache then fetching by stored ID."""
+        msg = self._draft_messages.pop(draft_id, None)
+        if msg:
+            return msg
+        draft = await db.get_draft(draft_id)
+        msg_id = draft.get("discord_message_id") if draft else None
+        if not msg_id:
+            return None
+        from bot.config import DISCORD_APPROVALS_CHANNEL_ID
+        channel = self.discord_bot.get_channel(DISCORD_APPROVALS_CHANNEL_ID)
+        if not channel:
+            return None
+        try:
+            return await channel.fetch_message(int(msg_id))
+        except Exception:
+            return None
+
     async def _handle_reject(self, draft_id: int, interaction=None):
+        # Idempotency: skip if already resolved
+        draft_check = await db.get_draft(draft_id)
+        if not draft_check or draft_check["status"] != "pending":
+            log.info("Draft #%d: already %s, skipping reject",
+                     draft_id, draft_check["status"] if draft_check else "missing")
+            return
+
         await db.update_draft(draft_id, status="rejected", resolved_at="now")
         await db.increment_stat("drafts_rejected")
 
+        # Fall back to fetching from Discord when _draft_messages is empty (post-restart)
         msg = self._draft_messages.pop(draft_id, None)
-        reason = "Rejected" if interaction else "Expired (timeout)"
+        if not msg and interaction and hasattr(interaction, "message"):
+            msg = interaction.message
+        if not msg:
+            msg = await self._get_draft_message(draft_id)
+        reason = "Rejected" if interaction else "Expired (stale draft)"
         if msg:
             await mark_rejected(msg, reason)
         log.info("Draft #%d: %s", draft_id, reason)
@@ -447,7 +490,7 @@ class SportsBotApp:
                         continue
                     await db.update_draft(sib["id"], status="rejected", resolved_at="now")
                     await db.increment_stat("drafts_rejected")
-                    sib_msg = self._draft_messages.pop(sib["id"], None)
+                    sib_msg = await self._get_draft_message(sib["id"])
                     if sib_msg:
                         await mark_rejected(sib_msg, "Rejected")
                     log.info("Draft #%d: auto-rejected (sibling of #%d)", sib["id"], draft_id)
@@ -486,7 +529,7 @@ class SportsBotApp:
                             if len(pd_keywords & keyword_set) >= 2:
                                 await db.update_draft(pd["draft_id"], status="rejected", resolved_at="now")
                                 await db.increment_stat("drafts_rejected")
-                                pd_msg = self._draft_messages.pop(pd["draft_id"], None)
+                                pd_msg = await self._get_draft_message(pd["draft_id"])
                                 if pd_msg:
                                     await mark_rejected(pd_msg, "Rejected")
                                 log.info("Draft #%d: auto-rejected (topic match with #%d)", pd["draft_id"], draft_id)
@@ -512,6 +555,10 @@ class SportsBotApp:
         # 2. Mark original draft as revised
         await db.update_draft(draft_id, status="revised", resolved_at="now")
         old_msg = self._draft_messages.pop(draft_id, None)
+        if not old_msg and interaction and hasattr(interaction, "message"):
+            old_msg = interaction.message
+        if not old_msg:
+            old_msg = await self._get_draft_message(draft_id)
         if old_msg:
             await mark_revised(old_msg)
 
@@ -560,6 +607,26 @@ class SportsBotApp:
             if msg:
                 self._draft_messages[new_draft_id] = msg
                 await db.update_draft(new_draft_id, discord_message_id=str(msg.id))
+
+    async def _expire_stale_drafts(self):
+        """Auto-reject pending drafts older than 1 hour (replaces discord.py on_timeout)."""
+        pending = await db.get_pending_drafts()
+        now = datetime.now(ZoneInfo("UTC"))
+        expired = 0
+        for draft in pending:
+            created = draft.get("created_at")
+            if not created:
+                continue
+            try:
+                created_dt = datetime.fromisoformat(created).replace(tzinfo=ZoneInfo("UTC"))
+            except (ValueError, TypeError):
+                continue
+            age_seconds = (now - created_dt).total_seconds()
+            if age_seconds > 3600:
+                await self._handle_reject(draft["id"], interaction=None)
+                expired += 1
+        if expired:
+            log.info("Expired %d stale draft(s)", expired)
 
 
 async def run(test_mode: bool = False):

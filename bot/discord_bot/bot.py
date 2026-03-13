@@ -8,6 +8,7 @@ from bot.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_APPROVALS_CH
 from bot.twitter.rate_limiter import budget_remaining
 from bot.twitter.tweet_fetcher import is_tweet_url, fetch_tweet_content, format_tweet_content, extract_tweet_id
 from bot.content.generator import generate_tweets_from_idea, generate_quote_tweets
+from bot.discord_bot.approval_view import ApprovalView
 from bot.discord_bot.channels import send_draft_for_approval
 from bot import database as db
 
@@ -30,6 +31,34 @@ class SportsBot(discord.Client):
 
     async def on_ready(self):
         log.info("Discord bot connected as %s", self.user)
+        await self._restore_approval_views()
+
+    async def _restore_approval_views(self):
+        """Re-register persistent views for all pending drafts so buttons survive restarts."""
+        pending = await db.get_pending_drafts()
+        restored = 0
+        for draft in pending:
+            msg_id = draft.get("discord_message_id")
+            if not msg_id:
+                continue
+            on_approve = getattr(self, "on_approve", None)
+            on_reject = getattr(self, "on_reject", None)
+            on_revise = getattr(self, "on_revise", None)
+            if not on_approve or not on_reject:
+                break
+            view = ApprovalView(
+                draft_id=draft["id"],
+                tweet_text=draft["tweet_text"],
+                on_approve=on_approve,
+                on_reject=on_reject,
+                on_revise=on_revise,
+                meme_id=draft.get("meme_id"),
+                article_url=draft.get("article_url"),
+            )
+            self.add_view(view, message_id=int(msg_id))
+            restored += 1
+        if restored:
+            log.info("Restored %d persistent approval view(s)", restored)
 
 
 def create_bot() -> SportsBot:

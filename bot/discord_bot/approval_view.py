@@ -54,7 +54,7 @@ class ApprovalView(discord.ui.View):
     def __init__(self, draft_id: int, tweet_text: str, on_approve, on_reject,
                  on_revise=None, meme_id: str | None = None,
                  article_url: str | None = None):
-        super().__init__(timeout=3600)  # 1 hour timeout
+        super().__init__(timeout=None)  # Persistent — survives restarts
         self.draft_id = draft_id
         self.tweet_text = tweet_text
         self.on_approve = on_approve
@@ -63,26 +63,52 @@ class ApprovalView(discord.ui.View):
         self.meme_id = meme_id
         self.article_url = article_url
 
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="\u2705")
-    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Build buttons with stable custom_id so discord.py can route
+        # interactions back to us after a restart.
+        approve_btn = discord.ui.Button(
+            label="Approve", style=discord.ButtonStyle.green,
+            emoji="\u2705", custom_id=f"approve:{draft_id}",
+        )
+        approve_btn.callback = self._approve_callback
+        self.add_item(approve_btn)
+
+        reject_btn = discord.ui.Button(
+            label="Reject", style=discord.ButtonStyle.red,
+            emoji="\u274c", custom_id=f"reject:{draft_id}",
+        )
+        reject_btn.callback = self._reject_callback
+        self.add_item(reject_btn)
+
+        edit_btn = discord.ui.Button(
+            label="Edit", style=discord.ButtonStyle.blurple,
+            emoji="\u270f\ufe0f", custom_id=f"edit:{draft_id}",
+        )
+        edit_btn.callback = self._edit_callback
+        self.add_item(edit_btn)
+
+        revise_btn = discord.ui.Button(
+            label="Revise", style=discord.ButtonStyle.blurple,
+            emoji="\U0001f504", custom_id=f"revise:{draft_id}",
+        )
+        revise_btn.callback = self._revise_callback
+        self.add_item(revise_btn)
+
+    async def _approve_callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         self.stop()
         await self.on_approve(self.draft_id, self.tweet_text, interaction)
 
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.red, emoji="\u274c")
-    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _reject_callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         self.stop()
         await self.on_reject(self.draft_id, interaction)
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.blurple, emoji="\u270f\ufe0f")
-    async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _edit_callback(self, interaction: discord.Interaction):
         modal = EditModal(self.tweet_text, self.draft_id, self.on_approve)
         await interaction.response.send_modal(modal)
         self.stop()
 
-    @discord.ui.button(label="Revise", style=discord.ButtonStyle.blurple, emoji="\U0001f504")
-    async def revise(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _revise_callback(self, interaction: discord.Interaction):
         if not self.on_revise:
             await interaction.response.send_message(
                 "Revise not available.", ephemeral=True
@@ -90,7 +116,3 @@ class ApprovalView(discord.ui.View):
             return
         modal = FeedbackModal(self.draft_id, self.tweet_text, self.on_revise)
         await interaction.response.send_modal(modal)
-
-    async def on_timeout(self):
-        log.info("Draft %d approval timed out", self.draft_id)
-        await self.on_reject(self.draft_id, None)
