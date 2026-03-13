@@ -36,7 +36,7 @@ async def fetch_tweet_content(url: str, session: aiohttp.ClientSession) -> dict 
 
     api_url = FXTWITTER_API.format(tweet_id=tweet_id)
     try:
-        async with session.get(api_url) as resp:
+        async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status != 200:
                 log.warning("FxTwitter API returned %d for tweet %s", resp.status, tweet_id)
                 return None

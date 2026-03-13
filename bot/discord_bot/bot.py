@@ -91,45 +91,52 @@ def create_bot() -> SportsBot:
         tweet="A tweet URL (x.com or twitter.com) or plain text to learn from",
     )
     async def learn_cmd(interaction: discord.Interaction, tweet: str):
-        source_url = None
-        content = tweet
-
-        if is_tweet_url(tweet):
-            session = getattr(bot, "http_session", None)
-            if not session:
-                await interaction.response.send_message(
-                    "Bot HTTP session not available. Try again in a moment.",
-                    ephemeral=True,
-                )
-                return
-
-            await interaction.response.defer(ephemeral=True)
-            tweet_data = await fetch_tweet_content(tweet, session)
-            if not tweet_data:
-                await interaction.followup.send(
-                    "Couldn't fetch that tweet. Check the URL and try again.",
-                    ephemeral=True,
-                )
-                return
-
-            content = format_tweet_content(tweet_data)
-            source_url = tweet
-        else:
+        try:
+            source_url = None
             content = tweet
 
-        ref_id = await db.insert_style_reference(
-            content=content,
-            source_url=source_url,
-            added_by=str(interaction.user),
-        )
-        count = await db.get_style_reference_count()
+            if is_tweet_url(tweet):
+                session = getattr(bot, "http_session", None)
+                if not session:
+                    await interaction.response.send_message(
+                        "Bot HTTP session not available. Try again in a moment.",
+                        ephemeral=True,
+                    )
+                    return
 
-        msg = f"Saved style reference #{ref_id} ({count} total):\n> {content[:300]}"
-        if interaction.response.is_done():
-            await interaction.followup.send(msg, ephemeral=True)
-        else:
-            await interaction.response.send_message(msg, ephemeral=True)
-        log.info("Style reference #%d added by %s", ref_id, interaction.user)
+                await interaction.response.defer(ephemeral=True)
+                tweet_data = await fetch_tweet_content(tweet, session)
+                if not tweet_data:
+                    await interaction.followup.send(
+                        "Couldn't fetch that tweet. Check the URL and try again.",
+                        ephemeral=True,
+                    )
+                    return
+
+                content = format_tweet_content(tweet_data)
+                source_url = tweet
+            else:
+                content = tweet
+
+            ref_id = await db.insert_style_reference(
+                content=content,
+                source_url=source_url,
+                added_by=str(interaction.user),
+            )
+            count = await db.get_style_reference_count()
+
+            msg = f"Saved style reference #{ref_id} ({count} total):\n> {content[:300]}"
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            log.info("Style reference #%d added by %s", ref_id, interaction.user)
+        except Exception:
+            log.exception("Error in /learn command")
+            if interaction.response.is_done():
+                await interaction.followup.send("Something went wrong. Try again.", ephemeral=True)
+            else:
+                await interaction.response.send_message("Something went wrong. Try again.", ephemeral=True)
 
     @bot.tree.command(name="references", description="View or manage saved style references")
     @app_commands.describe(action="What to do", ref_id="Reference ID (for delete)")
