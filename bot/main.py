@@ -293,6 +293,19 @@ class SportsBotApp:
         if not all_unprocessed:
             return
 
+        # Filter out articles whose topics have been rejected
+        suppressed_ids = []
+        for row in all_unprocessed:
+            if await db.is_topic_suppressed(row["title"]):
+                suppressed_ids.append(row["source_id"])
+                log.info("Suppressed (rejected topic): %s", row["title"])
+        if suppressed_ids:
+            await db.mark_articles_processed(suppressed_ids)
+            all_unprocessed = [r for r in all_unprocessed
+                               if r["source_id"] not in set(suppressed_ids)]
+        if not all_unprocessed:
+            return
+
         # Convert DB rows to SportEvents and score via the existing pipeline
         events = []
         local_news_sources = ("philly_news", "inquirer", "billypenn", "r_philadelphia")
@@ -409,6 +422,40 @@ class SportsBotApp:
         if msg:
             await mark_rejected(msg, reason)
         log.info("Draft #%d: %s", draft_id, reason)
+
+        # Only cascade + suppress on explicit rejection (not timeout)
+        if interaction:
+            draft = await db.get_draft(draft_id)
+            event_id = draft.get("event_id") if draft else None
+            if event_id:
+                # Reject all sibling pending drafts from the same event
+                siblings = await db.get_pending_drafts_by_event(event_id)
+                for sib in siblings:
+                    if sib["id"] == draft_id:
+                        continue
+                    await db.update_draft(sib["id"], status="rejected", resolved_at="now")
+                    await db.increment_stat("drafts_rejected")
+                    sib_msg = self._draft_messages.pop(sib["id"], None)
+                    if sib_msg:
+                        await mark_rejected(sib_msg, "Rejected")
+                    log.info("Draft #%d: auto-rejected (sibling of #%d)", sib["id"], draft_id)
+
+                # Suppress the topic so similar articles are skipped
+                event = await db.get_event(event_id)
+                if event and event.get("data"):
+                    import json
+                    try:
+                        event_data = json.loads(event["data"])
+                    except (json.JSONDecodeError, TypeError):
+                        event_data = {}
+                    title = event_data.get("title") or event.get("description") or ""
+                    keywords = db.extract_topic_keywords(title)
+                    if len(keywords) >= 2:
+                        await db.insert_rejected_topic(keywords, title, event_id)
+                        await send_log(
+                            self.discord_bot,
+                            f"Topic suppressed (48h): **{title}**\nKeywords: {', '.join(keywords)}"
+                        )
 
     async def _handle_revise(self, draft_id: int, tweet_text: str, feedback: str,
                              interaction=None):

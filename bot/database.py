@@ -1,7 +1,23 @@
+import json
+import re
 import aiosqlite
 from datetime import datetime, date
 
 from bot.config import DB_PATH
+
+STOPWORDS = {
+    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+    "her", "was", "one", "our", "out", "has", "have", "been", "will", "with",
+    "this", "that", "from", "they", "been", "said", "each", "which", "their",
+    "about", "would", "there", "could", "other", "into", "more", "some",
+    "than", "them", "very", "when", "what", "your", "how", "its", "may",
+    "after", "before", "just", "over", "also", "did", "get", "got", "why",
+    "new", "now", "old", "see", "way", "who", "does", "let", "say",
+    # Generic sports terms to avoid false positives
+    "nba", "nfl", "nhl", "mlb", "mls", "game", "team", "player", "season",
+    "trade", "draft", "coach", "play", "win", "loss", "score", "report",
+    "update", "news", "sports", "league", "series", "match", "round",
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -83,6 +99,15 @@ CREATE TABLE IF NOT EXISTS feedback_notes (
     original_tweet TEXT,
     added_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS rejected_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keywords TEXT NOT NULL,
+    source_title TEXT NOT NULL,
+    event_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
 """
 
 _db: aiosqlite.Connection | None = None
@@ -106,6 +131,16 @@ async def init_db():
         await _db.execute("ALTER TABLE drafts ADD COLUMN meme_id TEXT")
     if "article_url" not in draft_columns:
         await _db.execute("ALTER TABLE drafts ADD COLUMN article_url TEXT")
+
+    # Migration: create rejected_topics table for existing DBs
+    await _db.execute("""CREATE TABLE IF NOT EXISTS rejected_topics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        keywords TEXT NOT NULL,
+        source_title TEXT NOT NULL,
+        event_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        expires_at TEXT NOT NULL
+    )""")
 
     await _db.commit()
 
@@ -358,3 +393,59 @@ async def get_monthly_tweet_count() -> int:
     )
     row = await cursor.fetchone()
     return row[0]
+
+
+# --- Events (single-row fetch) ---
+
+async def get_event(event_id: int) -> dict | None:
+    db = get_db()
+    cursor = await db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+# --- Rejected Topics ---
+
+def extract_topic_keywords(title: str) -> list[str]:
+    """Extract up to 5 meaningful keywords from a title for topic matching."""
+    words = re.findall(r"[a-z]+", title.lower())
+    keywords = [w for w in words if len(w) >= 3 and w not in STOPWORDS]
+    return keywords[:5]
+
+
+async def insert_rejected_topic(keywords: list[str], source_title: str,
+                                 event_id: int | None = None, ttl_hours: int = 48):
+    db = get_db()
+    await db.execute(
+        """INSERT INTO rejected_topics (keywords, source_title, event_id, expires_at)
+           VALUES (?, ?, ?, datetime('now', ?))""",
+        (json.dumps(keywords), source_title, event_id, f"+{ttl_hours} hours"),
+    )
+    await db.commit()
+
+
+async def is_topic_suppressed(title: str) -> bool:
+    """Check if a title has 2+ keyword overlap with any non-expired rejected topic."""
+    title_keywords = set(extract_topic_keywords(title))
+    if len(title_keywords) < 2:
+        return False
+
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT keywords FROM rejected_topics WHERE expires_at > datetime('now')"
+    )
+    rows = await cursor.fetchall()
+    for row in rows:
+        rejected_keywords = set(json.loads(row[0]))
+        if len(title_keywords & rejected_keywords) >= 2:
+            return True
+    return False
+
+
+async def get_pending_drafts_by_event(event_id: int) -> list[dict]:
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT * FROM drafts WHERE event_id = ? AND status = 'pending'",
+        (event_id,),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
