@@ -175,40 +175,88 @@ def create_bot() -> SportsBot:
                 lines.append(f"**#{ref['id']}** — {preview}")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+    class QuoteModal(discord.ui.Modal, title="Quote tweet"):
+        tweet_input = discord.ui.TextInput(
+            label="Tweet URL or text",
+            style=discord.TextStyle.long,
+            placeholder="Paste a tweet URL or the full tweet text (line breaks OK)",
+            required=True,
+            max_length=2000,
+        )
+        context_input = discord.ui.TextInput(
+            label="Context (optional)",
+            style=discord.TextStyle.short,
+            placeholder="e.g. 'this is about the Sixers trade'",
+            required=False,
+            max_length=200,
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            try:
+                tweet = self.tweet_input.value
+                context = self.context_input.value or ""
+                source_text = tweet
+
+                # If it's a URL, fetch the actual tweet content (including any quoted tweet)
+                if is_tweet_url(tweet.strip()):
+                    session = getattr(bot, "http_session", None)
+                    if not session:
+                        await interaction.response.send_message(
+                            "Bot HTTP session not available. Try again in a moment.",
+                            ephemeral=True,
+                        )
+                        return
+
+                    await interaction.response.defer(ephemeral=True)
+                    tweet_data = await fetch_tweet_content(tweet.strip(), session)
+                    if not tweet_data:
+                        await interaction.followup.send(
+                            "Couldn't fetch that tweet. Check the URL and try again.",
+                            ephemeral=True,
+                        )
+                        return
+
+                    source_text = format_tweet_content(tweet_data)
+                else:
+                    await interaction.response.defer(ephemeral=True)
+
+                tweets = await generate_quote_tweets(source_text, context)
+                if not tweets:
+                    await interaction.followup.send("Couldn't generate a take on that. Try again?", ephemeral=True)
+                    return
+
+                for tweet_text in tweets:
+                    draft_id = await db.insert_draft({
+                        "event_id": None,
+                        "tweet_text": tweet_text,
+                        "status": "pending",
+                        "discord_message_id": None,
+                    })
+                    await db.increment_stat("drafts_created")
+
+                    msg = await send_draft_for_approval(
+                        bot,
+                        draft_id=draft_id,
+                        tweet_text=tweet_text,
+                        event_type="quote_tweet",
+                        event_description=f"Quote: {source_text[:100]}",
+                        on_approve=bot.on_approve,
+                        on_reject=bot.on_reject,
+                    )
+                    if msg:
+                        bot.draft_messages[draft_id] = msg
+                        await db.update_draft(draft_id, discord_message_id=str(msg.id))
+
+                await interaction.followup.send(f"Generated {len(tweets)} quote tweet(s) — check #approvals!", ephemeral=True)
+            except Exception:
+                log.exception("Error in /quote command")
+                if interaction.response.is_done():
+                    await interaction.followup.send("Something went wrong. Try again.", ephemeral=True)
+                else:
+                    await interaction.response.send_message("Something went wrong. Try again.", ephemeral=True)
+
     @bot.tree.command(name="quote", description="Generate a quote tweet reaction")
-    @app_commands.describe(
-        tweet="The tweet text or URL you want to quote tweet",
-        context="Optional extra context (e.g. 'this is about the Sixers trade')",
-    )
-    async def quote_cmd(interaction: discord.Interaction, tweet: str, context: str = ""):
-        await interaction.response.defer(ephemeral=True)
-        tweets = await generate_quote_tweets(tweet, context)
-        if not tweets:
-            await interaction.followup.send("Couldn't generate a take on that. Try again?", ephemeral=True)
-            return
-
-        for tweet_text in tweets:
-            draft_id = await db.insert_draft({
-                "event_id": None,
-                "tweet_text": tweet_text,
-                "status": "pending",
-                "discord_message_id": None,
-            })
-            await db.increment_stat("drafts_created")
-
-            msg = await send_draft_for_approval(
-                bot,
-                draft_id=draft_id,
-                tweet_text=tweet_text,
-                event_type="quote_tweet",
-                event_description=f"Quote: {tweet[:100]}",
-                on_approve=bot.on_approve,
-                on_reject=bot.on_reject,
-            )
-            if msg:
-                bot.draft_messages[draft_id] = msg
-                await db.update_draft(draft_id, discord_message_id=str(msg.id))
-
-        await interaction.followup.send(f"Generated {len(tweets)} quote tweet(s) — check #approvals!", ephemeral=True)
+    async def quote_cmd(interaction: discord.Interaction):
+        await interaction.response.send_modal(QuoteModal())
 
     return bot
