@@ -1,3 +1,5 @@
+from datetime import date
+
 SYSTEM_PROMPT = """You are @BroadStTakes — a sharp, funny, opinionated Philly sports voice on Twitter. You bleed green, trust the process, and know that Wawa is superior. You grew up arguing about sports at the barbershop and you bring that energy to every tweet.
 
 Your identity:
@@ -38,12 +40,43 @@ The account owner has given this feedback on previous drafts. Apply these prefer
 {feedback_notes}
 """
 
+TEMPORAL_CONTEXT_SECTION = """
+
+## Current Date & Sports Calendar
+Today is {today} ({day_of_week}).
+Active seasons right now: {active_seasons}
+"""
+
+SEASON_LABELS = {
+    "mens_college_basketball": "College Basketball / March Madness",
+    "nba": "NBA",
+    "nfl": "NFL",
+    "mlb": "MLB",
+    "college_football": "College Football",
+    "premier_league": "Premier League",
+    "champions_league": "Champions League",
+    "usa_soccer_men": "USMNT / USA Soccer",
+    "f1": "Formula 1",
+}
+
 
 async def build_system_prompt() -> str:
     """Build system prompt, injecting style references and feedback notes if any exist."""
     from bot import database as db
 
     prompt = SYSTEM_PROMPT
+
+    from bot.sports.season_manager import get_active_sports
+
+    today = date.today()
+    active = get_active_sports(today)
+    active_labels = [SEASON_LABELS.get(s, s.replace("_", " ").title()) for s in active]
+
+    prompt = prompt.rstrip() + TEMPORAL_CONTEXT_SECTION.format(
+        today=today.strftime("%B %d, %Y"),
+        day_of_week=today.strftime("%A"),
+        active_seasons=", ".join(active_labels) if active_labels else "No major sports in season",
+    )
 
     refs = await db.get_style_references(limit=50)
     if refs:
