@@ -77,12 +77,14 @@ class SportsBotApp:
         self._http_session = aiohttp.ClientSession()
         self.discord_bot.http_session = self._http_session
 
-        # Register news/RSS feed polling jobs
+        # Register news/RSS feed polling jobs (poll only — no processing)
         self.scheduler.register_feed("feed_espn_news", self._poll_espn_news)
         self.scheduler.register_feed("feed_rss", self._poll_rss_feeds)
+        # Single backlog processor runs on same interval, caps output globally
+        self.scheduler.register_feed("process_backlog", self._process_article_backlog)
 
         self.scheduler.start()
-        log.info("News and RSS feed polling registered")
+        log.info("News/RSS feed polling and backlog processor registered")
 
         # Start health-check server for Render, then run Discord bot
         self._health_runner = await self._start_health_server()
@@ -223,43 +225,41 @@ class SportsBotApp:
         return FEED_ACTIVE_START <= now.hour < FEED_ACTIVE_END
 
     async def _poll_espn_news(self):
+        """Poll ESPN for new articles and save to DB. No processing here."""
         if self.discord_bot.paused:
             return
-        # Always poll to save articles for dedup (they get processed=0 in DB)
         articles = await poll_espn_news(self._http_session)
-        if not self._is_active_hours():
-            if articles:
-                log.info("Outside active hours — queued %d ESPN articles for later", len(articles))
-            return
-        # During active hours: process new articles + any overnight backlog
-        await self._process_articles_with_backlog(articles)
+        if articles:
+            log.info("Polled %d new ESPN articles", len(articles))
 
     async def _poll_rss_feeds(self):
+        """Poll RSS feeds for new articles and save to DB. No processing here."""
         if self.discord_bot.paused:
             return
         articles = await poll_rss_feeds(self._http_session)
-        if not self._is_active_hours():
-            if articles:
-                log.info("Outside active hours — queued %d RSS articles for later", len(articles))
-            return
-        await self._process_articles_with_backlog(articles)
+        if articles:
+            log.info("Polled %d new RSS articles", len(articles))
 
-    async def _process_articles_with_backlog(self, new_articles: list[dict]):
-        """Process new articles plus any unprocessed backlog from off-hours.
+    async def _process_article_backlog(self):
+        """Process unprocessed article backlog — runs as a single scheduled job.
 
         Keeps the top MAX_BACKLOG articles by score and drip-feeds
         MAX_PER_CYCLE each polling interval.  Low-scoring and overflow
         articles are marked processed so they don't accumulate forever.
         """
+        if self.discord_bot.paused:
+            return
+        if not self._is_active_hours():
+            return
+
         MAX_BACKLOG = 15
         MAX_PER_CYCLE = 3
 
-        # Fetch all unprocessed articles (includes overnight backlog + just-polled)
         all_unprocessed = await db.get_unprocessed_articles()
         if not all_unprocessed:
             return
 
-        # Convert DB rows to article dicts and score via the existing pipeline
+        # Convert DB rows to SportEvents and score via the existing pipeline
         events = []
         for row in all_unprocessed:
             event = SportEvent(
