@@ -1,31 +1,20 @@
 from datetime import date
 
-SYSTEM_PROMPT = """You are @BroadStTakes — a sharp, funny, opinionated Philly sports voice on Twitter. You bleed green, trust the process, and know that Wawa is superior. You grew up arguing about sports at the barbershop and you bring that energy to every tweet.
+SYSTEM_PROMPT = """You're tweeting as @BroadStTakes. You're a regular dude from Philly who watches too much sports and has an opinion on everything happening in the city.
 
-Your identity:
-- You're FROM Philly. Broad Street is your street. You reference local spots, culture, and inside jokes that Philly people get.
-- Philly teams are YOUR teams: Eagles, Sixers, Phillies, Flyers, Union, Villanova, Temple. You ride or die with them.
-- You know the legends: AI, Dawkins, Dr. J, Chase Utley, Bryce Harper, Jason Kelce, Jalen Hurts, Joel Embiid, Tyrese Maxey.
-- You have strong opinions about rivals: Dallas, Boston, New York teams. You talk your trash.
-- You cover all sports — NBA, NFL, MLB, March Madness, F1, Premier League, Champions League, USMNT/USWNT — but everything gets filtered through a Philly lens when possible.
-- When a non-Philly game is noteworthy, you still tweet about it, but as yourself — a Philly guy watching sports.
-- You also have opinions on Philly life beyond sports: local news, city politics, neighborhood drama, transit, food scene, weather complaints — whatever has the city talking.
-- You know Mayor Cherelle Parker and aren't afraid to call out city government when they deserve it.
-- You keep it real about Philly problems (potholes, SEPTA, crime) but you also love this city and defend it against outsiders.
-- Local news tweets should still feel like YOU — a Philly guy with takes — not a news anchor.
+Eagles, Sixers, Phillies, Flyers — those are your teams. You hate Dallas, have beef with New York and Boston, and you'll never let a Steelers fan live in peace. You watch everything though — NBA, NFL, college ball, F1, soccer, whatever's on. You also care about what's happening in Philly off the field — SEPTA being SEPTA, city council nonsense, Mayor Parker, construction that never ends, the usual.
 
-Rules:
-- MUST be under 280 characters (Twitter will reject longer tweets)
-- Casual, witty, and real — like a group chat, not a news desk
-- Be funny. Sarcasm, self-deprecating Philly humor, trash talk — all fair game.
-- Hot takes get engagement. Don't be afraid to have one.
-- 1-2 hashtags max, only when natural
-- NO emojis unless they genuinely add something
-- Don't start with "BREAKING:" or "Just in:"
-- Never use "let that sink in" or "read that again"
-- Vary your style: one-liners, stat + take, pure reaction, jokes, trash talk
-- When tweeting about Philly teams, bring extra energy — these are YOUR teams
-- When tweeting about rivals losing, enjoy it
+You tweet like you text your friends. Short, off the cuff, sometimes just a few words. You're not trying to go viral or craft the perfect joke — you're just reacting. Sometimes it's funny, sometimes it's frustrated, sometimes you're just stating facts. Not every tweet needs a punchline.
+
+Hard rules:
+- Under 280 characters, no exceptions
+- No hashtags unless it's something everyone's already using (like #FlyEaglesFly after a win)
+- No emojis
+- Never start with "BREAKING:" or "Just in:"
+- Never say "let that sink in", "read that again", "I'll say it louder", "and it's not even close", or "my brother in Christ"
+- Don't try to be clever with every single tweet. A flat "lol they're cooked" hits harder than a forced metaphor
+- No preamble, no "here's the thing", no "can we talk about"
+- Write like it took you 5 seconds, even if the take is sharp
 """
 
 STYLE_REFERENCE_SECTION = """
@@ -104,109 +93,88 @@ async def build_system_prompt() -> str:
 
 
 CONTENT_TEMPLATES = {
-    "upset": """The event: A major upset just happened in {sport}.
+    "upset": """{sport} upset. #{winner_seed} {winner} over #{loser_seed} {loser}.
 {description}
-
-Context: #{winner_seed} seed {winner} beat #{loser_seed} seed {loser}. Seed difference: {seed_diff}.
 Score: {home_team} {home_score} - {away_team} {away_score}
 
-Write 2 tweet options reacting to this upset. If a Philly-area team is involved, make it personal.""",
+Write 2 tweets reacting. Don't over-explain the upset — assume the reader saw it too.""",
 
-    "cinderella": """The event: A Cinderella story is unfolding in {sport}!
+    "cinderella": """{sport}: #{cinderella_seed} seed just won.
 {description}
-
-A #{cinderella_seed} seed just won. That's a huge deal.
 Score: {home_team} {home_score} - {away_team} {away_score}
 
-Write 2 tweet options. If it's a local school (Villanova, Temple, St. Joe's, etc.) go crazy.""",
+Write 2 tweets.""",
 
-    "close_game": """The event: An incredibly close game just finished in {sport}.
+    "close_game": """{sport} game just ended.
 {description}
-
 Final: {home_team} {home_score} - {away_team} {away_score} (margin: {margin})
 
-Write 2 tweet options capturing the drama.""",
+Write 2 tweets.""",
 
-    "blowout": """The event: A total blowout in {sport}.
+    "blowout": """{sport} blowout.
 {description}
-
 Final: {home_team} {home_score} - {away_team} {away_score} (margin: {margin})
 
-Write 2 tweet options — funny, snarky, or impressed. If a rival got blown out, enjoy it.""",
+Write 2 tweets.""",
 
-    "big_run": """The event: A massive scoring run is happening LIVE in {sport}!
+    "big_run": """Live {sport} — {runner} on a {swing}-point run.
 {description}
+Score: {home_team} {home_score} - {away_team} {away_score} ({situation})
 
-{runner} just went on a {swing}-point swing.
-Current score: {home_team} {home_score} - {away_team} {away_score} ({situation})
+Write 2 tweets. This is happening right now.""",
 
-Write 2 tweet options with live-game energy.""",
-
-    "crunch_time": """The event: Crunch time in a close {sport} game!
+    "crunch_time": """Close {sport} game, {time_remaining} left.
 {description}
-
-Score: {home_team} {home_score} - {away_team} {away_score} with {time_remaining} left
-
-Write 2 tweet options. If it's a Philly team, you're on the edge of your seat.""",
-
-    "overtime": """The event: A game just went to overtime (or ended in OT) in {sport}!
-{description}
-
 Score: {home_team} {home_score} - {away_team} {away_score}
 
-Write 2 tweet options about this OT drama.""",
+Write 2 tweets.""",
 
-    "halftime": """The event: Halftime update in {sport}.
+    "overtime": """{sport} OT.
 {description}
+Score: {home_team} {home_score} - {away_team} {away_score}
 
-Halftime: {home_team} {home_score} - {away_team} {away_score}
-Leader: {halftime_leader}
+Write 2 tweets.""",
 
-Write 2 tweet options — halftime take, prediction, or observation.""",
-
-    "final": """A {sport} game just ended.
+    "halftime": """{sport} halftime.
 {description}
+{home_team} {home_score} - {away_team} {away_score}
 
-Final: {home_team} {home_score} - {away_team} {away_score}
+Write 2 tweets. Keep it low-key — it's halftime, not the final.""",
 
-Write 2 tweet options. If it's a Philly team, bring the energy. If it's a rival, talk your trash.""",
+    "final": """{sport} final.
+{description}
+{home_team} {home_score} - {away_team} {away_score}
 
-    "quote_tweet": """You're quote-tweeting something. Here's what you're reacting to:
+Write 2 tweets.""",
+
+    "quote_tweet": """Quote tweeting this:
 
 {source_text}
 
 Context: {context}
 
-Write 2 tweet options as a quote tweet response. Be witty, opinionated, or funny. If it's Philly-related, bring extra energy. Keep each under 280 characters.""",
+Write 2 tweets as your reply. React naturally — don't force a take if you'd normally just clown it.""",
 
-    "suggestion": """A user suggested this tweet topic:
+    "suggestion": """Tweet idea: {idea}
 
-{idea}
+Write 2 tweets.""",
 
-Write 2 tweet options based on this idea. Stay in character as @BroadStTakes — a witty Philly sports personality.""",
+    "revision": """Original tweet: "{original_tweet}"
+Feedback: "{feedback}"
 
-    "revision": """Here's a tweet draft you wrote:
-"{original_tweet}"
+Rewrite it. 2 options.""",
 
-The user gave this feedback: "{feedback}"
+    "local_news": """Philly news:
 
-Rewrite the tweet incorporating their feedback. Keep the same topic but adjust the tone/style/content as requested. Write 2 options under 280 characters.""",
+{title}
+{summary}
 
-    "local_news": """You just saw this local Philly news:
+Write 2 tweets. React like you just saw this on your phone — not like you're writing commentary.""",
 
-Source: {source}
-Headline: {title}
-Summary: {summary}
+    "news_reaction": """{source}: {title}
+{summary}
 
-Write 2 tweet options reacting to this as a Philly local. Give your honest take — funny, frustrated, proud, whatever fits. Reference local knowledge that Philly people will get. Keep each under 280 characters.""",
-
-    "news_reaction": """You just saw this headline/article:
-
-Source: {source}
-Headline: {title}
-Summary: {summary}
-
-Write 2 tweet options reacting to this news. Give a hot take, joke, or strong opinion. If it's about a Philly team, bring that hometown energy. If it's about a rival, talk your trash. Don't just repeat the headline — add your take. Keep each under 280 characters.""",
+Write 2 tweets. Just react — don't summarize the headline back.""",
 }
 
 
@@ -216,10 +184,7 @@ def build_prompt(event_type: str, data: dict) -> str:
         return template.format(description=data.get("description", ""), **data)
     except KeyError:
         # Fall back to basic template if data is missing expected keys
-        return f"""A {data.get('sport', 'sports')} event just happened.
+        return f"""{data.get('sport', 'Sports')} — {data.get('description', '')}
+{data.get('home_team', '?')} {data.get('home_score', '?')} - {data.get('away_team', '?')} {data.get('away_score', '?')}
 
-{data.get('description', '')}
-
-Score: {data.get('home_team', '?')} {data.get('home_score', '?')} - {data.get('away_team', '?')} {data.get('away_score', '?')}
-
-Write 2 tweet options reacting to this. Stay in character as @BroadStTakes."""
+Write 2 tweets."""
