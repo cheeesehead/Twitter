@@ -15,13 +15,13 @@ def create_twitter_client() -> tweepy.Client:
     )
 
 
-async def post_tweet(client: tweepy.Client, text: str) -> str | None:
-    """Post a tweet and return the tweet ID, or None on failure."""
+async def post_tweet(client: tweepy.Client, text: str) -> tuple[str | None, str | None]:
+    """Post a tweet and return (tweet_id, None) on success, or (None, error_message) on failure."""
     try:
         response = client.create_tweet(text=text)
         tweet_id = response.data["id"]
         log.info("Posted tweet %s: %s", tweet_id, text[:50])
-        return str(tweet_id)
-    except tweepy.TweepyException:
+        return str(tweet_id), None
+    except tweepy.TweepyException as e:
         log.exception("Failed to post tweet")
-        return None
+        return None, str(e)

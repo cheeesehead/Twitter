@@ -203,7 +203,7 @@ class SportsBotApp:
             await db.update_draft(draft_id, status="approved", resolved_at="now")
             return
 
-        tweet_id = await post_tweet(self.twitter_client, tweet_text)
+        tweet_id, error = await post_tweet(self.twitter_client, tweet_text)
         if tweet_id:
             await db.update_draft(draft_id, status="approved", resolved_at="now")
             await db.log_tweet(draft_id, tweet_id, tweet_text)
@@ -217,8 +217,10 @@ class SportsBotApp:
             await send_log(self.discord_bot, f"Posted tweet: {tweet_url}")
             log.info("Tweet posted: %s", tweet_url)
         else:
+            error_msg = f"Failed to post tweet: {error}" if error else "Failed to post tweet (unknown error)"
+            await send_log(self.discord_bot, error_msg)
             if interaction:
-                await interaction.followup.send("Failed to post tweet. Check logs.", ephemeral=True)
+                await interaction.followup.send(error_msg, ephemeral=True)
 
     # --- News/RSS feed polling ---
 
