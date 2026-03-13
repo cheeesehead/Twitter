@@ -78,226 +78,236 @@ CREATE TABLE IF NOT EXISTS daily_stats (
 );
 """
 
+_db: aiosqlite.Connection | None = None
+
 
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.executescript(SCHEMA)
-        # Migration: add processed column if missing (existing DBs)
-        cursor = await db.execute("PRAGMA table_info(articles)")
-        columns = [row[1] for row in await cursor.fetchall()]
-        if "processed" not in columns:
-            await db.execute("ALTER TABLE articles ADD COLUMN processed INTEGER DEFAULT 0")
-        await db.commit()
+    global _db
+    _db = await aiosqlite.connect(DB_PATH)
+    _db.row_factory = aiosqlite.Row
+    await _db.executescript(SCHEMA)
+    # Migration: add processed column if missing (existing DBs)
+    cursor = await _db.execute("PRAGMA table_info(articles)")
+    columns = [row[1] for row in await cursor.fetchall()]
+    if "processed" not in columns:
+        await _db.execute("ALTER TABLE articles ADD COLUMN processed INTEGER DEFAULT 0")
+    await _db.commit()
 
 
-async def get_db() -> aiosqlite.Connection:
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    return db
+async def close_db():
+    global _db
+    if _db:
+        await _db.close()
+        _db = None
+
+
+def get_db() -> aiosqlite.Connection:
+    assert _db is not None, "Database not initialized — call init_db() first"
+    return _db
 
 
 # --- Games ---
 
 async def upsert_game(game: dict):
-    async with await get_db() as db:
-        await db.execute(
-            """INSERT INTO games (id, sport, home_team, away_team, home_score, away_score,
-               status, period, clock, start_time, last_updated)
-               VALUES (:id, :sport, :home_team, :away_team, :home_score, :away_score,
-               :status, :period, :clock, :start_time, :last_updated)
-               ON CONFLICT(id) DO UPDATE SET
-               home_score=:home_score, away_score=:away_score, status=:status,
-               period=:period, clock=:clock, last_updated=:last_updated""",
-            game,
-        )
-        await db.commit()
+    db = get_db()
+    await db.execute(
+        """INSERT INTO games (id, sport, home_team, away_team, home_score, away_score,
+           status, period, clock, start_time, last_updated)
+           VALUES (:id, :sport, :home_team, :away_team, :home_score, :away_score,
+           :status, :period, :clock, :start_time, :last_updated)
+           ON CONFLICT(id) DO UPDATE SET
+           home_score=:home_score, away_score=:away_score, status=:status,
+           period=:period, clock=:clock, last_updated=:last_updated""",
+        game,
+    )
+    await db.commit()
 
 
 async def get_game(game_id: str) -> dict | None:
-    async with await get_db() as db:
-        cursor = await db.execute("SELECT * FROM games WHERE id = ?", (game_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+    db = get_db()
+    cursor = await db.execute("SELECT * FROM games WHERE id = ?", (game_id,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 # --- Events ---
 
 async def insert_event(event: dict) -> int:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            """INSERT INTO events (game_id, event_type, description, score, data)
-               VALUES (:game_id, :event_type, :description, :score, :data)""",
-            event,
-        )
-        await db.commit()
-        return cursor.lastrowid
+    db = get_db()
+    cursor = await db.execute(
+        """INSERT INTO events (game_id, event_type, description, score, data)
+           VALUES (:game_id, :event_type, :description, :score, :data)""",
+        event,
+    )
+    await db.commit()
+    return cursor.lastrowid
 
 
 async def get_recent_events(game_id: str, limit: int = 10) -> list[dict]:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM events WHERE game_id = ? ORDER BY created_at DESC LIMIT ?",
-            (game_id, limit),
-        )
-        return [dict(r) for r in await cursor.fetchall()]
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT * FROM events WHERE game_id = ? ORDER BY created_at DESC LIMIT ?",
+        (game_id, limit),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
 
 
 # --- Drafts ---
 
 async def insert_draft(draft: dict) -> int:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            """INSERT INTO drafts (event_id, tweet_text, status, discord_message_id)
-               VALUES (:event_id, :tweet_text, :status, :discord_message_id)""",
-            draft,
-        )
-        await db.commit()
-        return cursor.lastrowid
+    db = get_db()
+    cursor = await db.execute(
+        """INSERT INTO drafts (event_id, tweet_text, status, discord_message_id)
+           VALUES (:event_id, :tweet_text, :status, :discord_message_id)""",
+        draft,
+    )
+    await db.commit()
+    return cursor.lastrowid
 
 
 async def update_draft(draft_id: int, **kwargs):
-    async with await get_db() as db:
-        sets = ", ".join(f"{k} = ?" for k in kwargs)
-        vals = list(kwargs.values()) + [draft_id]
-        await db.execute(f"UPDATE drafts SET {sets} WHERE id = ?", vals)
-        await db.commit()
+    db = get_db()
+    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    vals = list(kwargs.values()) + [draft_id]
+    await db.execute(f"UPDATE drafts SET {sets} WHERE id = ?", vals)
+    await db.commit()
 
 
 async def get_draft(draft_id: int) -> dict | None:
-    async with await get_db() as db:
-        cursor = await db.execute("SELECT * FROM drafts WHERE id = ?", (draft_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+    db = get_db()
+    cursor = await db.execute("SELECT * FROM drafts WHERE id = ?", (draft_id,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
 
 
 async def get_pending_drafts() -> list[dict]:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM drafts WHERE status = 'pending' ORDER BY created_at ASC"
-        )
-        return [dict(r) for r in await cursor.fetchall()]
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT * FROM drafts WHERE status = 'pending' ORDER BY created_at ASC"
+    )
+    return [dict(r) for r in await cursor.fetchall()]
 
 
 # --- Tweet Log ---
 
 async def log_tweet(draft_id: int, tweet_id: str, tweet_text: str):
-    async with await get_db() as db:
-        await db.execute(
-            "INSERT INTO tweet_log (draft_id, tweet_id, tweet_text) VALUES (?, ?, ?)",
-            (draft_id, tweet_id, tweet_text),
-        )
-        await db.commit()
+    db = get_db()
+    await db.execute(
+        "INSERT INTO tweet_log (draft_id, tweet_id, tweet_text) VALUES (?, ?, ?)",
+        (draft_id, tweet_id, tweet_text),
+    )
+    await db.commit()
 
 
 # --- Daily Stats ---
 
 async def get_daily_stats(day: str | None = None) -> dict:
     day = day or date.today().isoformat()
-    async with await get_db() as db:
-        cursor = await db.execute("SELECT * FROM daily_stats WHERE date = ?", (day,))
-        row = await cursor.fetchone()
-        if row:
-            return dict(row)
-        await db.execute(
-            "INSERT INTO daily_stats (date) VALUES (?)", (day,)
-        )
-        await db.commit()
-        return {"date": day, "tweets_posted": 0, "drafts_created": 0,
-                "drafts_approved": 0, "drafts_rejected": 0}
+    db = get_db()
+    cursor = await db.execute("SELECT * FROM daily_stats WHERE date = ?", (day,))
+    row = await cursor.fetchone()
+    if row:
+        return dict(row)
+    await db.execute(
+        "INSERT INTO daily_stats (date) VALUES (?)", (day,)
+    )
+    await db.commit()
+    return {"date": day, "tweets_posted": 0, "drafts_created": 0,
+            "drafts_approved": 0, "drafts_rejected": 0}
 
 
 async def increment_stat(stat: str, day: str | None = None):
     day = day or date.today().isoformat()
     await get_daily_stats(day)  # ensure row exists
-    async with await get_db() as db:
-        await db.execute(
-            f"UPDATE daily_stats SET {stat} = {stat} + 1 WHERE date = ?", (day,)
-        )
-        await db.commit()
+    db = get_db()
+    await db.execute(
+        f"UPDATE daily_stats SET {stat} = {stat} + 1 WHERE date = ?", (day,)
+    )
+    await db.commit()
 
 
 # --- Articles (news/RSS dedup) ---
 
 async def article_exists(source_id: str) -> bool:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            "SELECT 1 FROM articles WHERE source_id = ?", (source_id,)
-        )
-        return await cursor.fetchone() is not None
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM articles WHERE source_id = ?", (source_id,)
+    )
+    return await cursor.fetchone() is not None
 
 
 async def insert_article(article: dict):
-    async with await get_db() as db:
-        await db.execute(
-            """INSERT OR IGNORE INTO articles (source_id, source, title, url, summary, teams)
-               VALUES (:source_id, :source, :title, :url, :summary, :teams)""",
-            article,
-        )
-        await db.commit()
+    db = get_db()
+    await db.execute(
+        """INSERT OR IGNORE INTO articles (source_id, source, title, url, summary, teams)
+           VALUES (:source_id, :source, :title, :url, :summary, :teams)""",
+        article,
+    )
+    await db.commit()
 
 
 async def get_unprocessed_articles() -> list[dict]:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM articles WHERE processed = 0 ORDER BY seen_at ASC"
-        )
-        return [dict(r) for r in await cursor.fetchall()]
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT * FROM articles WHERE processed = 0 ORDER BY seen_at ASC"
+    )
+    return [dict(r) for r in await cursor.fetchall()]
 
 
 async def mark_articles_processed(source_ids: list[str]):
     if not source_ids:
         return
-    async with await get_db() as db:
-        placeholders = ",".join("?" for _ in source_ids)
-        await db.execute(
-            f"UPDATE articles SET processed = 1 WHERE source_id IN ({placeholders})",
-            source_ids,
-        )
-        await db.commit()
+    db = get_db()
+    placeholders = ",".join("?" for _ in source_ids)
+    await db.execute(
+        f"UPDATE articles SET processed = 1 WHERE source_id IN ({placeholders})",
+        source_ids,
+    )
+    await db.commit()
 
 
 # --- Style References ---
 
 async def insert_style_reference(content: str, source_url: str | None = None,
                                   added_by: str | None = None) -> int:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            """INSERT INTO style_references (content, source_url, added_by)
-               VALUES (?, ?, ?)""",
-            (content, source_url, added_by),
-        )
-        await db.commit()
-        return cursor.lastrowid
+    db = get_db()
+    cursor = await db.execute(
+        """INSERT INTO style_references (content, source_url, added_by)
+           VALUES (?, ?, ?)""",
+        (content, source_url, added_by),
+    )
+    await db.commit()
+    return cursor.lastrowid
 
 
 async def get_style_references(limit: int = 50) -> list[dict]:
-    async with await get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM style_references ORDER BY added_at DESC LIMIT ?",
-            (limit,),
-        )
-        return [dict(r) for r in await cursor.fetchall()]
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT * FROM style_references ORDER BY added_at DESC LIMIT ?",
+        (limit,),
+    )
+    return [dict(r) for r in await cursor.fetchall()]
 
 
 async def delete_style_reference(ref_id: int):
-    async with await get_db() as db:
-        await db.execute("DELETE FROM style_references WHERE id = ?", (ref_id,))
-        await db.commit()
+    db = get_db()
+    await db.execute("DELETE FROM style_references WHERE id = ?", (ref_id,))
+    await db.commit()
 
 
 async def get_style_reference_count() -> int:
-    async with await get_db() as db:
-        cursor = await db.execute("SELECT COUNT(*) FROM style_references")
-        row = await cursor.fetchone()
-        return row[0]
+    db = get_db()
+    cursor = await db.execute("SELECT COUNT(*) FROM style_references")
+    row = await cursor.fetchone()
+    return row[0]
 
 
 async def get_monthly_tweet_count() -> int:
     month_prefix = date.today().strftime("%Y-%m")
-    async with await get_db() as db:
-        cursor = await db.execute(
-            "SELECT COALESCE(SUM(tweets_posted), 0) FROM daily_stats WHERE date LIKE ?",
-            (f"{month_prefix}%",),
-        )
-        row = await cursor.fetchone()
-        return row[0]
+    db = get_db()
+    cursor = await db.execute(
+        "SELECT COALESCE(SUM(tweets_posted), 0) FROM daily_stats WHERE date LIKE ?",
+        (f"{month_prefix}%",),
+    )
+    row = await cursor.fetchone()
+    return row[0]

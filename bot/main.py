@@ -112,6 +112,7 @@ class SportsBotApp:
                 await monitor.close()
         if hasattr(self, "_http_session") and self._http_session:
             await self._http_session.close()
+        await db.close_db()
         await self.discord_bot.close()
 
     async def _on_events(self, events: list[SportEvent]):
